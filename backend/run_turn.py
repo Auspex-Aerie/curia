@@ -22,7 +22,7 @@ from .models import (
 from .execution_quality import assess_from_response_dict, format_agent_notice
 from .execution_trace import build_execution_trace
 from .metrics import record_turn_metrics
-from .squad_plan import compute_squad_plan, normalize_policy
+from .squad_plan import compute_squad_plan, confirmation_notice, normalize_policy
 from .storage_service import StorageService
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ class TurnRunResult:
     response_dict: Dict[str, Any]
     execution: Optional[ArenaExecution] = None
     reset: bool = False
+    gated: bool = False
     context_sources: List[Dict[str, Any]] = field(default_factory=list)
     title_task: Optional[asyncio.Task] = None
 
@@ -140,6 +141,8 @@ async def run_turn(
     caller: Optional[str] = None,
     origin: Optional[str] = None,
     squad_policy: Optional[str] = None,
+    confirm: Optional[str] = None,
+    enforce_gate: bool = True,
 ) -> TurnRunResult:
     """
     Prepare context, run the arena for a conversation, optionally persist messages.
@@ -190,6 +193,39 @@ async def run_turn(
         get_rag_provider_dep().estimate_tokens(ctx.context_block) if ctx.context_block else 0
     )
 
+    squad_plan = compute_squad_plan(
+        mode=mode,
+        arena_models=arena_models,
+        chairman_model=chairman_model,
+        policy=resolved_policy,
+        iterations=ctx.directives.iterations_override,
+    )
+    # Soft-confirm gate (DEC-030): when a turn is large/costly enough to require
+    # confirmation and the caller has not echoed the plan fingerprint, return the
+    # plan WITHOUT running any model or persisting a user message. The notice
+    # instructs the driving agent to get user approval before confirming. The
+    # gate targets human-absent MCP/agent runs; interactive callers (the live
+    # streaming UI, where a human is watching) pass enforce_gate=False.
+    if enforce_gate and squad_plan.gate_required and (confirm or "") != squad_plan.plan_fingerprint:
+        gated_payload = {
+            "stage1": [],
+            "stage2": [],
+            "stage3": {},
+            "metadata": {
+                "mode": mode,
+                "squad_policy": squad_plan.policy,
+                "models_assigned": squad_plan.models_assigned,
+                "models_reserved": squad_plan.models_reserved,
+                "squad_plan": squad_plan.to_dict(),
+            },
+            "plan": squad_plan.to_dict(),
+            "requires_confirmation": True,
+            "agent_notice": confirmation_notice(squad_plan),
+            "directives": ctx.directives.dict(),
+            "warnings": list(ctx.warnings or []),
+        }
+        return TurnRunResult(response_dict=gated_payload, gated=True)
+
     title_task: Optional[asyncio.Task] = None
     if save_user:
         storage_svc.add_user_message(
@@ -202,14 +238,6 @@ async def run_turn(
             title_task = asyncio.create_task(generate_conversation_title(ctx.clean_query))
     elif is_first_message and schedule_title:
         title_task = asyncio.create_task(generate_conversation_title(ctx.clean_query))
-
-    squad_plan = compute_squad_plan(
-        mode=mode,
-        arena_models=arena_models,
-        chairman_model=chairman_model,
-        policy=resolved_policy,
-        iterations=ctx.directives.iterations_override,
-    )
 
     stage1_results, stage2_results, stage3_result, metadata = await run_full_arena(
         ctx.base_prompt,

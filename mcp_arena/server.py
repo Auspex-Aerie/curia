@@ -71,16 +71,37 @@ async def get_conversation(conversation_id: str) -> str:
 async def send_message(
     conversation_id: str,
     content: str,
+    squad_policy: str | None = None,
+    confirm: str | None = None,
 ) -> str:
-    """Run a full arena turn (all stages). Returns stage1, stage2, stage3, metadata, execution_quality."""
-    payload = enrich_turn_payload(await _get_client().send_message(conversation_id, content))
+    """Run a full arena turn (all stages). Returns stage1, stage2, stage3, metadata, execution_quality, and plan.
+
+    squad_policy: 'quorum' (default) or 'require_all'. When the projected turn is
+    large or costly, the response is {requires_confirmation: true, plan, agent_notice}
+    and NOTHING runs — check with the user, then re-call with
+    confirm=<plan.plan_fingerprint> to proceed.
+    """
+    payload = enrich_turn_payload(
+        await _get_client().send_message(
+            conversation_id, content, squad_policy=squad_policy, confirm=confirm
+        )
+    )
     return _json(payload)
 
 
 @mcp.tool()
-async def create_turn(conversation_id: str, content: str) -> str:
-    """Start an agent turn: prepare context, persist checkpoint. Council mode only."""
-    return _json(await _get_client().create_turn(conversation_id, content))
+async def create_turn(
+    conversation_id: str, content: str, squad_policy: str | None = None
+) -> str:
+    """Start an agent turn: prepare context, persist checkpoint (no model calls). Council mode only.
+
+    squad_policy: 'quorum' (default) or 'require_all'. The returned
+    turn.metadata.squad_plan carries the pre-flight projection (assigned/reserved
+    models, projected_calls, paid/free split).
+    """
+    return _json(
+        await _get_client().create_turn(conversation_id, content, squad_policy=squad_policy)
+    )
 
 
 @mcp.tool()

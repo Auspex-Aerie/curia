@@ -23,6 +23,7 @@ def get_turn_service(
 class CreateTurnRequest(BaseModel):
     content: str
     manual_context: List[Dict[str, Any]] | None = None
+    squad_policy: str | None = None
 
 
 class TurnResponse(BaseModel):
@@ -51,10 +52,16 @@ async def create_turn(
             manual_context=request.manual_context,
             agent_id=x_agent_id,
             origin=x_curia_origin or ("mcp" if x_agent_id else "api"),
+            squad_policy=request.squad_policy,
         )
     except ValueError as exc:
         detail = str(exc)
-        status = 404 if "not found" in detail.lower() else 409
+        if "squad_policy" in detail:
+            status = 422
+        elif "not found" in detail.lower():
+            status = 404
+        else:
+            status = 409
         raise HTTPException(status_code=status, detail=detail) from exc
 
     return {"turn": turn.to_api_dict()}

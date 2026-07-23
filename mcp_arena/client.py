@@ -69,10 +69,16 @@ class ArenaClient:
         conversation_id: str,
         content: str,
         manual_context: Optional[List[Dict[str, Any]]] = None,
+        squad_policy: Optional[str] = None,
+        confirm: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"content": content}
         if manual_context is not None:
             payload["manual_context"] = manual_context
+        if squad_policy is not None:
+            payload["squad_policy"] = squad_policy
+        if confirm is not None:
+            payload["confirm"] = confirm
         return await self._request(
             "POST",
             f"/api/conversations/{conversation_id}/message",
@@ -84,10 +90,13 @@ class ArenaClient:
         conversation_id: str,
         content: str,
         manual_context: Optional[List[Dict[str, Any]]] = None,
+        squad_policy: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"content": content}
         if manual_context is not None:
             payload["manual_context"] = manual_context
+        if squad_policy is not None:
+            payload["squad_policy"] = squad_policy
         return await self._request(
             "POST",
             f"/api/conversations/{conversation_id}/turns",

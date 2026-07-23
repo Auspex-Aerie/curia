@@ -49,6 +49,7 @@ class TurnService:
         manual_context: Optional[List[Dict[str, Any]]] = None,
         agent_id: Optional[str] = None,
         origin: Optional[str] = None,
+        squad_policy: Optional[str] = None,
     ) -> TurnRecord:
         try:
             with self.turn_store.creation_guard(conversation_id):
@@ -59,6 +60,7 @@ class TurnService:
                     manual_context=manual_context,
                     agent_id=agent_id,
                     origin=origin,
+                    squad_policy=squad_policy,
                 )
         except TurnCreationInProgress as exc:
             raise ValueError(str(exc)) from exc
@@ -72,6 +74,7 @@ class TurnService:
         manual_context: Optional[List[Dict[str, Any]]] = None,
         agent_id: Optional[str] = None,
         origin: Optional[str] = None,
+        squad_policy: Optional[str] = None,
     ) -> TurnRecord:
         conversation = self.storage.get_conversation(conversation_id)
         if conversation is None:
@@ -131,7 +134,9 @@ class TurnService:
             mode=mode,
             arena_models=arena_models,
             chairman_model=chairman_model,
-            policy=normalize_policy(settings.get("squad_policy")),
+            policy=normalize_policy(
+                squad_policy if squad_policy is not None else settings.get("squad_policy")
+            ),
             iterations=ctx.directives.iterations_override,
         )
 

@@ -37,6 +37,8 @@ class ConversationCreate(BaseModel):
 class MessageCreate(BaseModel):
     content: str
     manual_context: list[dict[str, Any]] | None = None
+    squad_policy: str | None = None
+    confirm: str | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -141,9 +143,13 @@ async def deliberation_create(
             persist=True,
             caller=agent_id,
             origin=_origin(agent_id, requested_origin),
+            squad_policy=request.squad_policy,
+            confirm=request.confirm,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        detail = str(exc)
+        status = 422 if "squad_policy" in detail else 404
+        raise HTTPException(status_code=status, detail=detail) from exc
     return result.response_dict
 
 
@@ -213,6 +219,7 @@ async def _deliberation_events(
                 schedule_title=not conversation["messages"],
                 caller=agent_id,
                 origin=call_origin,
+                enforce_gate=False,  # live UI stream: a human is watching, no soft-confirm gate
             )
         )
         async for progress_event in _progress_stream(runner, progress):
