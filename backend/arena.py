@@ -15,6 +15,7 @@ from .config import ARENA_MODELS, CHAIRMAN_MODEL
 from .cost_tracking import apply_usage_fields, sum_usage_fields, summarize_turn_cost
 from .execution_quality import CHAIRMAN_SYNTHESIS_ERROR
 from .prompts import render_prompt
+from .squad_plan import iterative_schedule, normalize_policy
 from .prompt_provenance import (
     artifact_ref,
     context_ref,
@@ -482,6 +483,7 @@ async def run_full_arena(
     context_tokens: int = 0,
     context_tokens_map: Optional[Dict[str, int]] = None,
     progress_cb: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    squad_policy: Optional[str] = None,
 ) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete arena deliberation process.
@@ -489,13 +491,16 @@ async def run_full_arena(
     Args:
         user_query: The user's question
         mode: Arena mode (council, round_robin, fight, stacks, complex_iterative, complex_questioning)
+        squad_policy: DEC-030 squad-utilization policy; only Complex Iterative
+            varies its model assignment by policy, so it is passed through to
+            that runner alone.
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     mode = (mode or "council").lower()
     runner = MODE_RUNNERS.get(mode, run_mode_council)
-    results = await runner(
+    runner_kwargs: Dict[str, Any] = dict(
         user_query=user_query,
         per_model_prompts=per_model_prompts,
         arena_models=arena_models,
@@ -505,6 +510,9 @@ async def run_full_arena(
         context_tokens_map=context_tokens_map,
         progress_cb=progress_cb,
     )
+    if mode == "complex_iterative":
+        runner_kwargs["squad_policy"] = squad_policy
+    results = await runner(**runner_kwargs)
     stage1_results, stage2_results, stage3_result, metadata = results
     normalized = normalize_arena_results(
         mode, stage1_results, stage2_results, stage3_result, metadata
@@ -1196,73 +1204,58 @@ async def run_mode_complex_iterative(
     context_tokens: int = 0,
     context_tokens_map: Optional[Dict[str, int]] = None,
     progress_cb: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    squad_policy: Optional[str] = None,
 ):
-    """Complex Iterative mode: Alternating extract/expand cycles."""
+    """Complex Iterative mode: alternating extract/expand cycles.
+
+    Model assignment follows the DEC-030 squad policy via the shared
+    ``iterative_schedule`` helper: ``quorum`` runs two extract/expand cycles
+    over the first two models (the remainder are reserves); ``require_all``
+    rotates every configured model through alternating roles.
+    """
     models = arena_models or ARENA_MODELS
     context_map = context_tokens_map or {}
     if len(models) < 2:
         return [], [], {"model": "error", "response": "Complex Iterative needs at least two models."}, {"mode": "complex_iterative"}
 
-    extract_model = models[0]
-    expand_model = models[1]
+    policy = normalize_policy(squad_policy)
+    schedule = iterative_schedule(models, policy)
     steps: List[Dict[str, Any]] = []
     summary = ""
     suggested = ""
-    total_steps = 5
-    await emit_execution_start(
-        progress_cb,
-        "complex_iterative",
-        total_steps,
-        ["extract", "expand", "extract", "expand", "chair_final"],
-    )
+    total_steps = len(schedule) + 1
+    labels = [role for role, _model in schedule] + ["chair_final"]
+    await emit_execution_start(progress_cb, "complex_iterative", total_steps, labels)
     step_idx = 0
-    for hop in range(4):  # extract/expand twice
-        if hop % 2 == 0:
+    for role, model in schedule:
+        if role == "extract":
             prompt = f"Extract: summarize intent and constraints; list key facts; propose the next prompt. Context:\n{user_query}\n\nPrior summary:\n{summary}\nPrior suggested:\n{suggested}"
-            start = time.time()
-            resp = await query_model(extract_model, [{"role": "user", "content": prompt}])
-            elapsed_ms = int((time.time() - start) * 1000)
-            text = resp.get("content", "") if resp else ""
-            extract_step = apply_usage_fields(
-                {
-                    "model": extract_model,
-                    "response": text,
-                    "role": "extract",
-                    "prompt_preview": prompt[:500],
-                    "prompt_full": prompt,
-                    "est_tokens": max(len(prompt) // 4, 1),
-                    "context_tokens": context_map.get(extract_model, context_map.get("__base__", context_tokens)),
-                    "duration_ms": elapsed_ms,
-                },
-                resp,
-            )
-            steps.append(extract_step)
-            summary = text or summary
-            step_idx += 1
-            await emit_step_complete(progress_cb, extract_step, step_idx, total_steps)
         else:
             prompt = f"Expand the prior extract; elaborate actionable detail and improve the suggested prompt.\nPrior summary:\n{summary}\nPrior suggested:\n{suggested}"
-            start = time.time()
-            resp = await query_model(expand_model, [{"role": "user", "content": prompt}])
-            elapsed_ms = int((time.time() - start) * 1000)
-            text = resp.get("content", "") if resp else ""
-            expand_step = apply_usage_fields(
-                {
-                    "model": expand_model,
-                    "response": text,
-                    "role": "expand",
-                    "prompt_preview": prompt[:500],
-                    "prompt_full": prompt,
-                    "est_tokens": max(len(prompt) // 4, 1),
-                    "context_tokens": context_map.get(expand_model, context_map.get("__base__", context_tokens)),
-                    "duration_ms": elapsed_ms,
-                },
-                resp,
-            )
-            steps.append(expand_step)
+        start = time.time()
+        resp = await query_model(model, [{"role": "user", "content": prompt}])
+        elapsed_ms = int((time.time() - start) * 1000)
+        text = resp.get("content", "") if resp else ""
+        step = apply_usage_fields(
+            {
+                "model": model,
+                "response": text,
+                "role": role,
+                "prompt_preview": prompt[:500],
+                "prompt_full": prompt,
+                "est_tokens": max(len(prompt) // 4, 1),
+                "context_tokens": context_map.get(model, context_map.get("__base__", context_tokens)),
+                "duration_ms": elapsed_ms,
+            },
+            resp,
+        )
+        steps.append(step)
+        if role == "extract":
+            summary = text or summary
+        else:
             suggested = text or suggested
-            step_idx += 1
-            await emit_step_complete(progress_cb, expand_step, step_idx, total_steps)
+        step_idx += 1
+        await emit_step_complete(progress_cb, step, step_idx, total_steps)
 
     final_prompt = f"Use the latest extract/expand chain to answer the original question.\nOriginal question:\n{user_query}\n\nLatest summary:\n{summary}\nLatest expansion:\n{suggested}\n\nFirst, briefly summarize what you saw in each extract/expand step (2 sentences or a short paragraph per item), labeled 'What I saw'. Then provide the final answer."
     start = time.time()

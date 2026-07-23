@@ -22,6 +22,7 @@ from .models import (
 from .execution_quality import assess_from_response_dict, format_agent_notice
 from .execution_trace import build_execution_trace
 from .metrics import record_turn_metrics
+from .squad_plan import compute_squad_plan, normalize_policy
 from .storage_service import StorageService
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,10 @@ def _assistant_metadata(
         "mode": mode,
         "chairman_model": chairman_model,
         "arena_models": arena_models,
+        "squad_policy": metadata.get("squad_policy"),
+        "models_assigned": metadata.get("models_assigned"),
+        "models_reserved": metadata.get("models_reserved"),
+        "squad_plan": metadata.get("squad_plan"),
         "arena_squad": metadata.get("arena_squad"),
         "steps": metadata.get("steps"),
         "execution_trace": metadata.get("execution_trace"),
@@ -134,6 +139,7 @@ async def run_turn(
     schedule_title: bool = True,
     caller: Optional[str] = None,
     origin: Optional[str] = None,
+    squad_policy: Optional[str] = None,
 ) -> TurnRunResult:
     """
     Prepare context, run the arena for a conversation, optionally persist messages.
@@ -147,6 +153,9 @@ async def run_turn(
     arena_models = settings.get("arena_models", ARENA_MODELS)
     chairman_model = settings.get("chairman_model", CHAIRMAN_MODEL)
     mode = conversation.get("mode", "council")
+    resolved_policy = normalize_policy(
+        squad_policy if squad_policy is not None else settings.get("squad_policy")
+    )
     is_first_message = len(conversation.get("messages", [])) == 0
     save_user = persist if persist_user is None else persist_user
     save_assistant = persist if persist_assistant is None else persist_assistant
@@ -194,6 +203,14 @@ async def run_turn(
     elif is_first_message and schedule_title:
         title_task = asyncio.create_task(generate_conversation_title(ctx.clean_query))
 
+    squad_plan = compute_squad_plan(
+        mode=mode,
+        arena_models=arena_models,
+        chairman_model=chairman_model,
+        policy=resolved_policy,
+        iterations=ctx.directives.iterations_override,
+    )
+
     stage1_results, stage2_results, stage3_result, metadata = await run_full_arena(
         ctx.base_prompt,
         ctx.per_model_prompts if ctx.per_model_prompts else None,
@@ -204,9 +221,14 @@ async def run_turn(
         context_tokens=context_tokens,
         context_tokens_map=ctx.context_token_map,
         progress_cb=progress_cb,
+        squad_policy=resolved_policy,
     )
 
     metadata["directives"] = ctx.directives.dict()
+    metadata["squad_policy"] = squad_plan.policy
+    metadata["models_assigned"] = squad_plan.models_assigned
+    metadata["models_reserved"] = squad_plan.models_reserved
+    metadata["squad_plan"] = squad_plan.to_dict()
     metadata["warnings"] = list(ctx.warnings or [])
     metadata["mode"] = mode
     metadata["arena_squad"] = settings.get("arena_squad")
@@ -246,7 +268,7 @@ async def run_turn(
         stage2=stage2_results,
         stage3=stage3_result,
         failures=metadata.get("model_failures") or [],
-        arena_models=arena_models,
+        arena_models=squad_plan.models_assigned,
         chairman_model=chairman_model,
         has_context=bool(ctx.context_block),
         context_source_count=len(ctx.context_sources or []),

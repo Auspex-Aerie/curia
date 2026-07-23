@@ -61,7 +61,10 @@ def assess_execution_quality(
     """
     meta = metadata or {}
     mode_key = (mode or meta.get("mode") or "council").lower()
-    models = arena_models or meta.get("arena_models") or []
+    # DEC-030: expected counts read the assigned set (models actually mapped to
+    # slots), not the full configured squad, so declared reserves are not
+    # counted as failed or missing. Falls back to the full squad pre-DEC-030.
+    models = arena_models or meta.get("models_assigned") or meta.get("arena_models") or []
     failures = list(meta.get("model_failures") or [])
     steps = list(meta.get("steps") or [])
     trace = meta.get("execution_trace") or {}
@@ -357,7 +360,7 @@ def assess_from_response_dict(payload: Dict[str, Any]) -> Dict[str, Any]:
         stage1=payload.get("stage1"),
         stage2=payload.get("stage2"),
         stage3=payload.get("stage3"),
-        arena_models=meta.get("arena_models"),
+        arena_models=meta.get("models_assigned") or meta.get("arena_models"),
     )
 
 

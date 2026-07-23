@@ -1,0 +1,79 @@
+"""Complex Iterative squad-policy behavior (DEC-030 / INC-006).
+
+Verifies the runner honors the squad policy through the shared
+``iterative_schedule``: ``quorum`` uses only the first two models (rest are
+reserves), ``require_all`` rotates the whole squad through alternating roles.
+"""
+
+import pytest
+
+from backend.arena import run_mode_complex_iterative
+
+
+def _fake_query():
+    calls = []
+
+    async def fake_query(model, messages, timeout=120.0, log_error=True):
+        calls.append(model)
+        return {"content": f"OUT::{model}", "usage": {}}
+
+    return fake_query, calls
+
+
+@pytest.mark.asyncio
+async def test_quorum_uses_first_two_models_only(monkeypatch):
+    fake_query, _calls = _fake_query()
+    monkeypatch.setattr("backend.arena.query_model", fake_query)
+
+    squad = ["m0", "m1", "m2", "m3"]
+    steps, _s2, chair, meta = await run_mode_complex_iterative(
+        "q", None, squad, "chair", squad_policy="quorum"
+    )
+
+    # Two extract/expand cycles over the first two models; chair excluded.
+    assert [s["model"] for s in steps] == ["m0", "m1", "m0", "m1"]
+    assert [s["role"] for s in steps] == ["extract", "expand", "extract", "expand"]
+    assert {"m2", "m3"}.isdisjoint({s["model"] for s in steps})
+    assert chair["model"] == "chair"
+    assert len(meta["steps"]) == 5  # 4 + chair_final
+
+
+@pytest.mark.asyncio
+async def test_require_all_covers_full_squad(monkeypatch):
+    fake_query, _calls = _fake_query()
+    monkeypatch.setattr("backend.arena.query_model", fake_query)
+
+    squad = ["m0", "m1", "m2", "m3"]
+    steps, _s2, chair, meta = await run_mode_complex_iterative(
+        "q", None, squad, "chair", squad_policy="require_all"
+    )
+
+    assert {s["model"] for s in steps} == set(squad)
+    assert [s["role"] for s in steps] == ["extract", "expand", "extract", "expand"]
+    assert chair["model"] == "chair"
+
+
+@pytest.mark.asyncio
+async def test_require_all_scales_beyond_four(monkeypatch):
+    fake_query, _calls = _fake_query()
+    monkeypatch.setattr("backend.arena.query_model", fake_query)
+
+    squad = [f"m{i}" for i in range(5)]
+    steps, _s2, chair, meta = await run_mode_complex_iterative(
+        "q", None, squad, "chair", squad_policy="require_all"
+    )
+
+    assert len(steps) == 5  # max(4, 5) role steps
+    assert {s["model"] for s in steps} == set(squad)
+    assert len(meta["steps"]) == 6  # 5 + chair_final
+
+
+@pytest.mark.asyncio
+async def test_defaults_to_quorum_when_policy_absent(monkeypatch):
+    fake_query, _calls = _fake_query()
+    monkeypatch.setattr("backend.arena.query_model", fake_query)
+
+    squad = ["m0", "m1", "m2"]
+    steps, _s2, _chair, _meta = await run_mode_complex_iterative("q", None, squad, "chair")
+
+    assert [s["model"] for s in steps] == ["m0", "m1", "m0", "m1"]

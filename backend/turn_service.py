@@ -20,6 +20,7 @@ from .execution_quality import assess_from_response_dict
 from .execution_trace import build_execution_trace
 from .models import TurnCheckpoint, TurnRecord, TurnStatus
 from .run_turn import _assistant_metadata
+from .squad_plan import compute_squad_plan, normalize_policy
 from .storage_service import StorageService
 from .turn_store import TurnCreationInProgress, TurnStore
 
@@ -126,6 +127,14 @@ class TurnService:
             iterations_override=ctx.directives.iterations_override,
         )
 
+        plan = compute_squad_plan(
+            mode=mode,
+            arena_models=arena_models,
+            chairman_model=chairman_model,
+            policy=normalize_policy(settings.get("squad_policy")),
+            iterations=ctx.directives.iterations_override,
+        )
+
         turn = TurnRecord(
             turn_id=str(uuid.uuid4()),
             conversation_id=conversation_id,
@@ -137,7 +146,13 @@ class TurnService:
             user_query=ctx.clean_query,
             user_query_raw=content,
             checkpoint=checkpoint,
-            metadata={"arena_squad": settings.get("arena_squad")},
+            metadata={
+                "arena_squad": settings.get("arena_squad"),
+                "squad_policy": plan.policy,
+                "models_assigned": plan.models_assigned,
+                "models_reserved": plan.models_reserved,
+                "squad_plan": plan.to_dict(),
+            },
         )
         return self._save_turn(turn)
 
