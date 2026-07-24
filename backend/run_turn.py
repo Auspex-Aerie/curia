@@ -22,7 +22,7 @@ from .models import (
 from .execution_quality import assess_from_response_dict, format_agent_notice
 from .execution_trace import build_execution_trace
 from .metrics import record_turn_metrics
-from .squad_plan import compute_squad_plan, confirmation_notice, normalize_policy
+from .squad_plan import SquadPlan, compute_squad_plan, confirmation_notice, normalize_policy
 from .storage_service import StorageService
 
 logger = logging.getLogger(__name__)
@@ -143,11 +143,16 @@ async def run_turn(
     squad_policy: Optional[str] = None,
     confirm: Optional[str] = None,
     enforce_gate: bool = True,
+    precomputed_plan: Optional[SquadPlan] = None,
 ) -> TurnRunResult:
     """
     Prepare context, run the arena for a conversation, optionally persist messages.
 
     Used by sync message API, streaming API, and MCP full-turn tools.
+
+    ``precomputed_plan`` lets the live stream emit the same plan object it will
+    execute (DEC-030 Phase C) so the SSE pre-flight view cannot diverge from
+    the plan stored on the completed turn.
     """
     conversation = storage_svc.get_conversation(conversation_id)
     if conversation is None:
@@ -193,13 +198,18 @@ async def run_turn(
         get_rag_provider_dep().estimate_tokens(ctx.context_block) if ctx.context_block else 0
     )
 
-    squad_plan = compute_squad_plan(
-        mode=mode,
-        arena_models=arena_models,
-        chairman_model=chairman_model,
-        policy=resolved_policy,
-        iterations=ctx.directives.iterations_override,
-    )
+    if precomputed_plan is not None:
+        squad_plan = precomputed_plan
+        # Keep policy resolution consistent with the plan the caller already showed.
+        resolved_policy = squad_plan.policy
+    else:
+        squad_plan = compute_squad_plan(
+            mode=mode,
+            arena_models=arena_models,
+            chairman_model=chairman_model,
+            policy=resolved_policy,
+            iterations=ctx.directives.iterations_override,
+        )
     # Soft-confirm gate (DEC-030): when a turn is large/costly enough to require
     # confirmation and the caller has not echoed the plan fingerprint, return the
     # plan WITHOUT running any model or persisting a user message. The notice

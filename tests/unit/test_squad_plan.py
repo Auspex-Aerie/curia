@@ -10,6 +10,7 @@ import pytest
 
 from backend.squad_plan import (
     DEFAULT_CALL_THRESHOLD,
+    PARTIAL_SQUAD_MODES,
     QUORUM,
     REQUIRE_ALL,
     compute_squad_plan,
@@ -107,11 +108,32 @@ class TestProjectedCalls:
             chairman_model="chair:free", policy=REQUIRE_ALL,
         ).projected_calls == 10
 
+    def test_require_all_odd_squad_wraps_first_model(self):
+        # 3 models → 4 steps: m0 appears twice; assigned still lists each once.
+        squad = _free_squad(3)
+        schedule = iterative_schedule(squad, REQUIRE_ALL)
+        assert len(schedule) == 4
+        models_in_order = [m for _role, m in schedule]
+        assert models_in_order.count(squad[0]) == 2
+        assert models_in_order.count(squad[1]) == 1
+        assert models_in_order.count(squad[2]) == 1
+        plan = compute_squad_plan(
+            mode="complex_iterative",
+            arena_models=squad,
+            chairman_model="chair:free",
+            policy=REQUIRE_ALL,
+        )
+        assert plan.models_assigned == squad
+        assert plan.projected_calls == 5  # 4 arena + chair
+
 
 # --- assignment / reserves --------------------------------------------------
 
 
 class TestAssignment:
+    def test_partial_squad_modes_is_the_assignment_gate(self):
+        assert PARTIAL_SQUAD_MODES == frozenset({"complex_iterative"})
+
     def test_whole_squad_modes_assign_all_no_reserves(self):
         for mode in ("council", "round_robin", "fight", "stacks", "complex_questioning"):
             plan = compute_squad_plan(

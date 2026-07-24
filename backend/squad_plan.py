@@ -52,16 +52,10 @@ def normalize_policy(value: Optional[str]) -> str:
 
 # --- mode taxonomy ----------------------------------------------------------
 
-# Modes whose runner already assigns every configured arena model to a slot.
-# Complex Iterative is the sole structural exception (fixed arity of two roles).
-WHOLE_SQUAD_MODES = {
-    "council",
-    "round_robin",
-    "fight",
-    "stacks",
-    "complex_questioning",
-    "baseline",
-}
+# Modes that structurally assign only a subset of the configured squad (or a
+# policy-scaled schedule over it). Everything *not* listed here is whole-squad:
+# every configured arena model is assigned; there are no reserves.
+PARTIAL_SQUAD_MODES = frozenset({"complex_iterative"})
 
 # Provisional soft-confirm threshold (DEC-030): gate a turn for confirmation when
 # its exact projected model-call count exceeds this. Paid-call-weighted gating
@@ -92,9 +86,13 @@ def iterative_schedule(
     * ``quorum``: the historical behavior — two extract/expand cycles over the
       first two models (``models[0]`` extracts, ``models[1]`` expands). Members
       beyond the first two are reserves.
-    * ``require_all``: rotate every configured model through alternating roles,
-      running ``max(4, len(models))`` steps so participation covers the whole
-      squad without dropping below the default two-cycle iteration depth.
+    * ``require_all``: round-robin every configured model through alternating
+      roles for ``max(4, len(models))`` steps so the whole squad participates
+      without dropping below the default two-cycle depth. Call count is exact;
+      per-model call counts are *not* equal when ``len(models)`` does not divide
+      the step budget (e.g. 3 models → 4 steps: m0 appears twice, m1/m2 once).
+      ``models_assigned`` still lists each model once; operators should read
+      ``role_calls`` / ``projected_calls`` for cost, not assume equal share.
     """
     if not models:
         return []
@@ -115,11 +113,17 @@ def iterative_schedule(
 def _assigned_and_schedule(
     mode: str, arena_models: List[str], policy: str
 ) -> Tuple[List[str], List[str], Optional[List[Tuple[str, str]]]]:
-    """Split the configured squad into (assigned, reserved) and, for Complex
-    Iterative, the ``(role, model)`` schedule computed once from the *full*
-    squad so it matches the runner exactly (no second, possibly-divergent
-    computation over the deduped assigned set)."""
-    if mode == "complex_iterative":
+    """Split the configured squad into (assigned, reserved) and, for partial
+    modes, the ``(role, model)`` schedule computed once from the *full* squad
+    so it matches the runner exactly (no second, possibly-divergent computation
+    over the deduped assigned set).
+
+    Gate is ``PARTIAL_SQUAD_MODES``: modes not in that set are whole-squad
+    (every configured member assigned, no reserves). New partial modes must be
+    added there *and* get a schedule implementation in this branch.
+    """
+    if mode in PARTIAL_SQUAD_MODES:
+        # Today only Complex Iterative; its schedule is the shared source of truth.
         schedule = iterative_schedule(arena_models, policy)
         assigned: List[str] = []
         for _role, model in schedule:
@@ -127,7 +131,7 @@ def _assigned_and_schedule(
                 assigned.append(model)
         reserved = [m for m in arena_models if m not in assigned]
         return assigned, reserved, schedule
-    # Whole-squad modes assign every configured member; no reserves.
+    # Whole-squad: every configured member assigned; no reserves.
     return list(arena_models), [], None
 
 

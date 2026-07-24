@@ -258,8 +258,9 @@ async def _deliberation_events(
                 schedule_title=not conversation["messages"],
                 caller=agent_id,
                 origin=call_origin,
-                squad_policy=request.squad_policy,
+                squad_policy=resolved_policy,
                 enforce_gate=False,  # live UI stream: a human is watching, no soft-confirm gate
+                precomputed_plan=preflight_plan,  # same plan object as the SSE pre-flight event
             )
         )
         async for progress_event in _progress_stream(runner, progress):
@@ -293,17 +294,23 @@ async def _deliberation_events(
         if not stage1:
             message = "No arena responses received; check model availability or API key."
             yield _sse("error", message=message)
+            # Prefer full turn metadata (plan/quality/steps) when present so the
+            # client is not stuck on a stale pre-flight plan with no failure signal.
+            error_meta = {
+                **(metadata or {}),
+                "mode": metadata.get("mode") or conversation.get("mode", "council"),
+            }
             storage.add_assistant_message(
                 conversation_id,
                 [],
                 [],
                 {"model": "system", "response": message},
                 turn.context_sources,
-                metadata={"mode": conversation.get("mode", "council")},
+                metadata=error_meta,
                 caller=agent_id,
                 origin=call_origin,
             )
-            yield _sse("complete")
+            yield _sse("complete", metadata=error_meta)
             return
 
         if stage2:
