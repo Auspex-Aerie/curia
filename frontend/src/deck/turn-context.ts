@@ -152,7 +152,10 @@ export function buildTurnContext(
 ): TurnContextSnapshot {
   const messages: Message[] = conversation?.messages || [];
   const meta = msg?.metadata || {};
-  const arenaModels = (meta.arena_models as string[]) || [];
+  // Prefer assigned set (DEC-030) so breadcrumb health matches quality/trace.
+  const assigned = (meta.models_assigned as string[] | undefined) || [];
+  const arenaModels =
+    assigned.length > 0 ? assigned : ((meta.arena_models as string[]) || []);
   const stage1 = msg?.stage1 || [];
   const mode = String(meta.mode || conversation?.mode || 'council');
   const trace = executionTrace(msg || undefined, mode);

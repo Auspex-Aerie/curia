@@ -21,6 +21,7 @@ from ..dependencies import (
     load_runtime_settings,
 )
 from ..run_turn import run_turn
+from ..squad_plan import compute_squad_plan, normalize_policy
 from ..storage_service import StorageService
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
@@ -192,6 +193,44 @@ async def _deliberation_events(
                     "targets": context.summarize_targets,
                 },
             )
+
+        # Pre-flight squad plan (DEC-030 Phase C): surface assigned/reserved +
+        # projected calls on the live stream *before* any model work, matching
+        # the pure computation run_turn performs at the same chokepoint.
+        arena_models = settings.get("arena_models", ARENA_MODELS)
+        chairman_model = settings.get("chairman_model", CHAIRMAN_MODEL)
+        mode = conversation.get("mode", "council")
+        try:
+            resolved_policy = normalize_policy(
+                request.squad_policy
+                if request.squad_policy is not None
+                else settings.get("squad_policy")
+            )
+        except ValueError as exc:
+            yield _sse("error", message=str(exc))
+            return
+        preflight_plan = compute_squad_plan(
+            mode=mode,
+            arena_models=arena_models,
+            chairman_model=chairman_model,
+            policy=resolved_policy,
+            iterations=context.directives.iterations_override,
+        )
+        plan_dict = preflight_plan.to_dict()
+        yield _sse(
+            "squad_plan",
+            data=plan_dict,
+            metadata={
+                "mode": mode,
+                "squad_policy": preflight_plan.policy,
+                "models_assigned": preflight_plan.models_assigned,
+                "models_reserved": preflight_plan.models_reserved,
+                "squad_plan": plan_dict,
+                "arena_models": list(arena_models),
+                "chairman_model": chairman_model,
+            },
+        )
+
         yield _sse("stage1_start")
 
         storage.add_user_message(
@@ -219,6 +258,7 @@ async def _deliberation_events(
                 schedule_title=not conversation["messages"],
                 caller=agent_id,
                 origin=call_origin,
+                squad_policy=request.squad_policy,
                 enforce_gate=False,  # live UI stream: a human is watching, no soft-confirm gate
             )
         )
@@ -241,6 +281,12 @@ async def _deliberation_events(
                 "label_to_model": metadata.get("label_to_model"),
                 "aggregate_rankings": metadata.get("aggregate_rankings"),
                 "cost": metadata.get("cost"),
+                "squad_policy": metadata.get("squad_policy"),
+                "models_assigned": metadata.get("models_assigned"),
+                "models_reserved": metadata.get("models_reserved"),
+                "squad_plan": metadata.get("squad_plan"),
+                "arena_models": metadata.get("arena_models"),
+                "chairman_model": metadata.get("chairman_model"),
             },
         )
 
@@ -281,7 +327,8 @@ async def _deliberation_events(
             caller=agent_id,
             origin=call_origin,
         )
-        yield _sse("complete")
+        # Full metadata so the live client can merge plan/quality/trace without a reload.
+        yield _sse("complete", metadata=metadata)
     except asyncio.CancelledError:
         if runner and not runner.done():
             runner.cancel()
