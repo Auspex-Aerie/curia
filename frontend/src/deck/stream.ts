@@ -64,6 +64,19 @@ export async function runTurnStream(
     [],
     (eventType: string, event: { data?: unknown; metadata?: Record<string, unknown> }) => {
       switch (eventType) {
+        case 'squad_plan': {
+          // Pre-flight plan before any model call (DEC-030 Phase C).
+          updateConversation((_c, a) => {
+            a.metadata = { ...(a.metadata || {}), ...(event.metadata || {}) };
+            if (event.data && typeof event.data === 'object') {
+              a.metadata = {
+                ...(a.metadata || {}),
+                squad_plan: event.data as Record<string, unknown>,
+              };
+            }
+          });
+          break;
+        }
         case 'stage1_start': {
           const now = Date.now();
           setTurnRuntime(runtimeOnStageStart(getState().turnRuntime, turnIdx, 'stage1', now));
@@ -117,6 +130,14 @@ export async function runTurnStream(
           });
           break;
         }
+        case 'complete':
+          // Merge full turn metadata (plan, quality, trace) at end of stream.
+          if (event.metadata) {
+            updateConversation((_c, a) => {
+              a.metadata = { ...(a.metadata || {}), ...event.metadata };
+            });
+          }
+          break;
         case 'execution_complete':
           updateConversation((_c, a) => {
             const d = (event.data || {}) as Record<string, unknown>;
@@ -131,6 +152,7 @@ export async function runTurnStream(
           });
           break;
         case 'context_sources':
+        case 'rag_context':
           updateConversation((_c, a) => {
             a.contextSources = event.data as unknown[];
           });

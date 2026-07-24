@@ -415,7 +415,10 @@ function renderDeck() {
       id === 'quality' &&
       (msg?.metadata?.execution_quality ||
         (msg?.metadata?.model_failures as unknown[] | undefined)?.length ||
-        ((msg?.stage1?.length || 0) < ((msg?.metadata?.arena_models as string[] | undefined)?.length || 0)))
+        ((msg?.stage1?.length || 0) < (
+          ((msg?.metadata?.models_assigned as string[] | undefined)?.length || 0) ||
+          ((msg?.metadata?.arena_models as string[] | undefined)?.length || 0)
+        )))
     ) {
       cls += ' done';
     } else if (complete && id !== 'context' && id !== 'quality') {

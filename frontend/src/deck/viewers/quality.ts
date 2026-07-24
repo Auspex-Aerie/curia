@@ -42,7 +42,10 @@ export function renderQualityViewport(
   const eq = meta.execution_quality as Record<string, unknown> | undefined;
   const failures = (meta.model_failures as ModelFailure[]) || [];
   const obs = (meta.observation_pending as Record<string, unknown>[]) || [];
-  const arena = (meta.arena_models as string[]) || [];
+  // Expected participants = assigned set when present (DEC-030); else full squad.
+  const assigned = (meta.models_assigned as string[] | undefined) || [];
+  const arena =
+    assigned.length > 0 ? assigned : ((meta.arena_models as string[]) || []);
   const mode = String(meta.mode || 'council');
   const trace = executionTrace(msg, mode);
   const responded = trace?.summary.participant_succeeded ?? (msg.stage1 || []).length;

@@ -8,8 +8,12 @@ from backend.execution_quality import assess_from_response_dict, format_agent_no
 
 
 def enrich_turn_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Attach execution_quality and agent_notice to a full-turn API payload."""
+    """Attach execution_quality, agent_notice, and the squad plan to a full-turn
+    API payload. A gated (soft-confirm) response ran nothing and already carries
+    `plan` + `agent_notice`, so it passes through untouched."""
     if not payload or payload.get("reset"):
+        return payload
+    if payload.get("requires_confirmation"):
         return payload
     enriched = dict(payload)
     quality = enriched.get("execution_quality") or assess_from_response_dict(enriched)
@@ -17,6 +21,10 @@ def enrich_turn_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     notice = format_agent_notice(quality)
     if notice:
         enriched["agent_notice"] = notice
+    # DEC-030: surface the pre-flight squad plan alongside the completed turn.
+    plan = (enriched.get("metadata") or {}).get("squad_plan")
+    if plan and "plan" not in enriched:
+        enriched["plan"] = plan
     return enriched
 
 

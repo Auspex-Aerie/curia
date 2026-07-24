@@ -21,6 +21,7 @@ from ..dependencies import (
     load_runtime_settings,
 )
 from ..run_turn import run_turn
+from ..squad_plan import compute_squad_plan, normalize_policy
 from ..storage_service import StorageService
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
@@ -37,6 +38,8 @@ class ConversationCreate(BaseModel):
 class MessageCreate(BaseModel):
     content: str
     manual_context: list[dict[str, Any]] | None = None
+    squad_policy: str | None = None
+    confirm: str | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -141,9 +144,13 @@ async def deliberation_create(
             persist=True,
             caller=agent_id,
             origin=_origin(agent_id, requested_origin),
+            squad_policy=request.squad_policy,
+            confirm=request.confirm,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        detail = str(exc)
+        status = 422 if "squad_policy" in detail else 404
+        raise HTTPException(status_code=status, detail=detail) from exc
     return result.response_dict
 
 
@@ -186,6 +193,44 @@ async def _deliberation_events(
                     "targets": context.summarize_targets,
                 },
             )
+
+        # Pre-flight squad plan (DEC-030 Phase C): surface assigned/reserved +
+        # projected calls on the live stream *before* any model work, matching
+        # the pure computation run_turn performs at the same chokepoint.
+        arena_models = settings.get("arena_models", ARENA_MODELS)
+        chairman_model = settings.get("chairman_model", CHAIRMAN_MODEL)
+        mode = conversation.get("mode", "council")
+        try:
+            resolved_policy = normalize_policy(
+                request.squad_policy
+                if request.squad_policy is not None
+                else settings.get("squad_policy")
+            )
+        except ValueError as exc:
+            yield _sse("error", message=str(exc))
+            return
+        preflight_plan = compute_squad_plan(
+            mode=mode,
+            arena_models=arena_models,
+            chairman_model=chairman_model,
+            policy=resolved_policy,
+            iterations=context.directives.iterations_override,
+        )
+        plan_dict = preflight_plan.to_dict()
+        yield _sse(
+            "squad_plan",
+            data=plan_dict,
+            metadata={
+                "mode": mode,
+                "squad_policy": preflight_plan.policy,
+                "models_assigned": preflight_plan.models_assigned,
+                "models_reserved": preflight_plan.models_reserved,
+                "squad_plan": plan_dict,
+                "arena_models": list(arena_models),
+                "chairman_model": chairman_model,
+            },
+        )
+
         yield _sse("stage1_start")
 
         storage.add_user_message(
@@ -213,6 +258,9 @@ async def _deliberation_events(
                 schedule_title=not conversation["messages"],
                 caller=agent_id,
                 origin=call_origin,
+                squad_policy=resolved_policy,
+                enforce_gate=False,  # live UI stream: a human is watching, no soft-confirm gate
+                precomputed_plan=preflight_plan,  # same plan object as the SSE pre-flight event
             )
         )
         async for progress_event in _progress_stream(runner, progress):
@@ -234,23 +282,35 @@ async def _deliberation_events(
                 "label_to_model": metadata.get("label_to_model"),
                 "aggregate_rankings": metadata.get("aggregate_rankings"),
                 "cost": metadata.get("cost"),
+                "squad_policy": metadata.get("squad_policy"),
+                "models_assigned": metadata.get("models_assigned"),
+                "models_reserved": metadata.get("models_reserved"),
+                "squad_plan": metadata.get("squad_plan"),
+                "arena_models": metadata.get("arena_models"),
+                "chairman_model": metadata.get("chairman_model"),
             },
         )
 
         if not stage1:
             message = "No arena responses received; check model availability or API key."
             yield _sse("error", message=message)
+            # Prefer full turn metadata (plan/quality/steps) when present so the
+            # client is not stuck on a stale pre-flight plan with no failure signal.
+            error_meta = {
+                **(metadata or {}),
+                "mode": metadata.get("mode") or conversation.get("mode", "council"),
+            }
             storage.add_assistant_message(
                 conversation_id,
                 [],
                 [],
                 {"model": "system", "response": message},
                 turn.context_sources,
-                metadata={"mode": conversation.get("mode", "council")},
+                metadata=error_meta,
                 caller=agent_id,
                 origin=call_origin,
             )
-            yield _sse("complete")
+            yield _sse("complete", metadata=error_meta)
             return
 
         if stage2:
@@ -274,7 +334,8 @@ async def _deliberation_events(
             caller=agent_id,
             origin=call_origin,
         )
-        yield _sse("complete")
+        # Full metadata so the live client can merge plan/quality/trace without a reload.
+        yield _sse("complete", metadata=metadata)
     except asyncio.CancelledError:
         if runner and not runner.done():
             runner.cancel()
