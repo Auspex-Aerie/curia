@@ -10,6 +10,7 @@ import pytest
 
 from backend.squad_plan import (
     DEFAULT_CALL_THRESHOLD,
+    DEFAULT_PAID_CALL_THRESHOLD,
     PARTIAL_SQUAD_MODES,
     QUORUM,
     REQUIRE_ALL,
@@ -18,6 +19,7 @@ from backend.squad_plan import (
     is_free_model,
     iterative_schedule,
     normalize_policy,
+    resolve_gate_thresholds,
 )
 
 
@@ -227,25 +229,54 @@ class TestFingerprint:
 
 class TestGate:
     def test_under_threshold_no_gate(self):
-        # council M=4 -> 9 calls, at/under the threshold (12).
+        # council M=4 free + free chair -> 9 calls, 0 paid.
         plan = compute_squad_plan(mode="council", arena_models=_free_squad(4), chairman_model="chair:free")
         assert plan.projected_calls == 9 <= DEFAULT_CALL_THRESHOLD
+        assert plan.projected_paid_calls == 0
         assert plan.gate_required is False
 
-    def test_over_threshold_gates(self):
-        # fight M=4 -> 13 calls, over the threshold.
+    def test_over_call_threshold_gates(self):
+        # fight M=4 free -> 13 calls, over call threshold.
         plan = compute_squad_plan(mode="fight", arena_models=_free_squad(4), chairman_model="chair:free")
         assert plan.projected_calls == 13
         assert plan.gate_required is True
         assert str(DEFAULT_CALL_THRESHOLD) in plan.gate_reason
 
-    def test_gate_is_call_count_based_not_paid_presence(self):
-        # A small paid run does not gate on paid presence alone (Phase A):
-        # paid exposure is surfaced for the human, but the trigger is call count.
+    def test_single_paid_chair_does_not_gate_small_turn(self):
+        # Paid-call weighting is per *call*, not mere paid presence: one paid
+        # chair on a 9-call free council stays under paid_call_threshold (4).
         plan = compute_squad_plan(mode="council", arena_models=_free_squad(4), chairman_model="paid/chair")
         assert plan.paid_models == ["paid/chair"]
         assert plan.projected_calls == 9
+        assert plan.projected_paid_calls == 1
         assert plan.gate_required is False
+
+    def test_paid_call_threshold_gates_all_paid_squad(self):
+        paid = [f"paid/m{i}" for i in range(4)]
+        plan = compute_squad_plan(
+            mode="council", arena_models=paid, chairman_model="paid/chair"
+        )
+        assert plan.projected_calls == 9
+        assert plan.projected_paid_calls == 9
+        assert plan.gate_required is True
+        assert "paid" in (plan.gate_reason or "").lower()
+
+    def test_explicit_thresholds_override_frozen(self):
+        plan = compute_squad_plan(
+            mode="council",
+            arena_models=_free_squad(4),
+            chairman_model="chair:free",
+            call_threshold=5,
+            paid_call_threshold=100,
+        )
+        assert plan.projected_calls == 9
+        assert plan.gate_required is True
+        assert plan.call_threshold == 5
+
+    def test_resolve_gate_thresholds_matches_defaults(self):
+        call_t, paid_t = resolve_gate_thresholds()
+        assert call_t == DEFAULT_CALL_THRESHOLD
+        assert paid_t == DEFAULT_PAID_CALL_THRESHOLD
 
     def test_large_free_run_still_gates(self):
         # freebee9 council -> 19 calls: gates on call count regardless of free tier.
@@ -263,3 +294,4 @@ def test_confirmation_notice_instructs_user_approval():
     assert "approval" in notice.lower()
     assert plan.plan_fingerprint in notice
     assert "do not" in notice.lower()
+    assert "paid" in notice.lower()

@@ -23,6 +23,8 @@ class TestFrozenSnapshot:
         assert snap.generation >= 1
         assert snap.arena.context.safety_margin == 0.85
         assert snap.arena.tag_modifiers["free"] == 0.25
+        assert snap.arena.squad_gate.call_threshold == 12
+        assert snap.arena.squad_gate.paid_call_threshold == 4
         assert "meta-llama/llama-3.3-70b-instruct:free" in snap.catalog.models
 
     def test_freeze_is_immutable(self):

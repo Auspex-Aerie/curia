@@ -34,6 +34,24 @@ class CatalogPolicyConfig(BaseModel):
     observation_ttl_days: int = 60
 
 
+class SquadGateConfig(BaseModel):
+    """Soft-confirm thresholds for MCP/agent full turns (DEC-030 follow-up).
+
+    A turn requires confirmation when either limit is exceeded. Interactive
+    Observatory streams bypass the gate entirely (``enforce_gate=False``).
+    """
+
+    model_config = _FROZEN
+
+    # Gate when projected model-call count exceeds this (all models).
+    call_threshold: int = 12
+    # Gate when projected *paid* model-call count exceeds this (per-role
+    # attribution: each answer/ranking/draft/… call by a paid model counts 1).
+    # Defaults high enough that a single paid chair on a free arena does not
+    # alone force confirm; a fully paid cheap_pros council (9 calls) still does.
+    paid_call_threshold: int = 4
+
+
 class ArenaConfig(BaseModel):
     model_config = _FROZEN
 
@@ -42,6 +60,7 @@ class ArenaConfig(BaseModel):
     summarizer: SummarizerConfig = Field(default_factory=SummarizerConfig)
     catalog: CatalogPolicyConfig = Field(default_factory=CatalogPolicyConfig)
     tag_modifiers: Dict[str, float] = Field(default_factory=lambda: {"free": 0.25})
+    squad_gate: SquadGateConfig = Field(default_factory=SquadGateConfig)
 
 
 class ModelEntry(BaseModel):

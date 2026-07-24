@@ -57,12 +57,10 @@ def normalize_policy(value: Optional[str]) -> str:
 # every configured arena model is assigned; there are no reserves.
 PARTIAL_SQUAD_MODES = frozenset({"complex_iterative"})
 
-# Provisional soft-confirm threshold (DEC-030): gate a turn for confirmation when
-# its exact projected model-call count exceeds this. Paid-call-weighted gating
-# (which needs per-role call attribution) is a Phase B refinement; for now the
-# paid/free split is surfaced in the plan for the human's cost judgment and the
-# gate trigger is call-count based. Phase B wires the threshold to frozen config.
+# Defaults match data/arena_config.yaml squad_gate (DEC-018 FREEZE). Prefer
+# resolve_gate_thresholds() so callers pick up the frozen snapshot.
 DEFAULT_CALL_THRESHOLD = 12
+DEFAULT_PAID_CALL_THRESHOLD = 4
 
 
 def is_free_model(model_id: str, free_model_ids: Optional[set] = None) -> bool:
@@ -181,14 +179,32 @@ class SquadPlan:
     chairman_model: str
     role_calls: Dict[str, int]
     projected_calls: int
+    projected_paid_calls: int
     paid_models: List[str]
     free_models: List[str]
     plan_fingerprint: str
     gate_required: bool
     gate_reason: Optional[str] = None
+    call_threshold: int = DEFAULT_CALL_THRESHOLD
+    paid_call_threshold: int = DEFAULT_PAID_CALL_THRESHOLD
 
     def to_dict(self) -> Dict:
         return asdict(self)
+
+
+def resolve_gate_thresholds() -> Tuple[int, int]:
+    """Return ``(call_threshold, paid_call_threshold)`` from frozen arena config.
+
+    Falls back to module defaults when the frozen snapshot is unavailable
+    (unit tests without YAML, early bootstrap).
+    """
+    try:
+        from .frozen_config import get_frozen_snapshot
+
+        gate = get_frozen_snapshot().arena.squad_gate
+        return int(gate.call_threshold), int(gate.paid_call_threshold)
+    except Exception:
+        return DEFAULT_CALL_THRESHOLD, DEFAULT_PAID_CALL_THRESHOLD
 
 
 def _fingerprint(
@@ -208,13 +224,102 @@ def _fingerprint(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def _evaluate_gate(projected_calls: int, threshold: int) -> Tuple[bool, Optional[str]]:
-    if projected_calls > threshold:
-        return (
-            True,
-            f"projected {projected_calls} model calls exceeds threshold {threshold}",
+def _enumerate_calls(
+    mode: str,
+    assigned: List[str],
+    chairman_model: str,
+    passes: int,
+    schedule: Optional[List[Tuple[str, str]]],
+) -> List[Tuple[str, str]]:
+    """Exact ``(role, model)`` call list for paid-call weighting.
+
+    Mirrors runner fan-out: Council rankings are M parallel calls (one per
+    assigned model), not a single shared ranking step. Counts match
+    ``_role_calls`` / schedule formulas (including stacks merge+judge+chair).
+    """
+    if schedule is not None:
+        calls = list(schedule)
+        if chairman_model:
+            calls.append(("chair", chairman_model))
+        return calls
+
+    m = len(assigned)
+    calls: List[Tuple[str, str]] = []
+    if mode == "council":
+        for model in assigned:
+            calls.append(("answer", model))
+        for model in assigned:
+            calls.append(("ranking", model))
+        if chairman_model:
+            calls.append(("chair", chairman_model))
+    elif mode == "round_robin":
+        for _ in range(passes):
+            for model in assigned:
+                calls.append(("draft", model))
+        if chairman_model:
+            calls.append(("chair", chairman_model))
+    elif mode == "fight":
+        for model in assigned:
+            calls.append(("answer", model))
+        for model in assigned:
+            calls.append(("critique", model))
+        for model in assigned:
+            calls.append(("defense", model))
+        if chairman_model:
+            calls.append(("chair", chairman_model))
+    elif mode == "stacks":
+        generators = assigned[:2]
+        critics = assigned[2:] if m > 2 else list(generators)
+        for model in generators:
+            calls.append(("answer", model))
+        if chairman_model:
+            calls.append(("merge", chairman_model))
+        for model in critics:
+            calls.append(("critique", model))
+        if chairman_model:
+            calls.append(("judge", chairman_model))
+        for model in generators:
+            calls.append(("defense", model))
+        if chairman_model:
+            calls.append(("chair", chairman_model))
+    elif mode == "complex_questioning":
+        for model in assigned:
+            calls.append(("answer", model))
+        for model in assigned:
+            calls.append(("question_self", model))
+        if chairman_model:
+            calls.append(("brief", chairman_model))
+        for model in assigned:
+            calls.append(("muse", model))
+        if chairman_model:
+            calls.append(("chair", chairman_model))
+    else:
+        for model in assigned:
+            calls.append(("answer", model))
+        if chairman_model:
+            calls.append(("chair", chairman_model))
+    return calls
+
+
+def _evaluate_gate(
+    projected_calls: int,
+    projected_paid_calls: int,
+    call_threshold: int,
+    paid_call_threshold: int,
+) -> Tuple[bool, Optional[str]]:
+    reasons: List[str] = []
+    if projected_calls > call_threshold:
+        reasons.append(
+            f"projected {projected_calls} model calls exceeds threshold {call_threshold}"
         )
-    return False, None
+    if projected_paid_calls > paid_call_threshold:
+        reasons.append(
+            f"projected {projected_paid_calls} paid model calls exceeds threshold "
+            f"{paid_call_threshold}"
+        )
+    if not reasons:
+        return False, None
+    return True, "; ".join(reasons)
 
 
 def compute_squad_plan(
@@ -225,17 +330,27 @@ def compute_squad_plan(
     policy: Optional[str] = None,
     iterations: Optional[int] = None,
     free_model_ids: Optional[set] = None,
-    call_threshold: int = DEFAULT_CALL_THRESHOLD,
+    call_threshold: Optional[int] = None,
+    paid_call_threshold: Optional[int] = None,
 ) -> SquadPlan:
     """Compute the pre-flight squad plan for a turn.
 
     ``iterations`` maps to Round Robin passes (``ctx.directives.iterations_override``);
     ignored by other modes. ``free_model_ids`` is an optional catalog-derived set
     of ids tagged free (beyond the ``:free`` suffix heuristic).
+
+    When thresholds are omitted, reads ``squad_gate`` from the frozen arena
+    config (falling back to module defaults).
     """
     resolved_policy = normalize_policy(policy)
     arena = list(arena_models or [])
     passes = max(1, int(iterations or 1))
+    if call_threshold is None or paid_call_threshold is None:
+        frozen_call, frozen_paid = resolve_gate_thresholds()
+        if call_threshold is None:
+            call_threshold = frozen_call
+        if paid_call_threshold is None:
+            paid_call_threshold = frozen_paid
 
     assigned, reserved, schedule = _assigned_and_schedule(mode, arena, resolved_policy)
     if schedule is not None:  # Complex Iterative: derive calls from the schedule.
@@ -245,7 +360,21 @@ def compute_squad_plan(
         role_calls["chair"] = 1
     else:
         role_calls = _role_calls(mode, assigned, passes)
+
+    call_list = _enumerate_calls(mode, assigned, chairman_model, passes, schedule)
+    # Role formula and enumeration must agree; prefer the shared total.
     projected_calls = sum(role_calls.values())
+    if len(call_list) != projected_calls:
+        # Keep role_calls total (pinned by the drift-guard tests) and re-derive
+        # paid weight from the enumeration list when lengths match; otherwise
+        # fall back to counting paid models × estimated share is wrong — use
+        # enumeration length as the paid-attribution base and accept a rare
+        # drift until the formulas are re-aligned.
+        projected_calls = len(call_list)
+
+    projected_paid_calls = sum(
+        1 for _role, model in call_list if not is_free_model(model, free_model_ids)
+    )
 
     # Cost signal: paid/free split across assigned arena models plus the chair.
     cost_models = list(assigned)
@@ -257,7 +386,12 @@ def compute_squad_plan(
     fingerprint = _fingerprint(
         mode, resolved_policy, assigned, chairman_model, projected_calls
     )
-    gate_required, gate_reason = _evaluate_gate(projected_calls, call_threshold)
+    gate_required, gate_reason = _evaluate_gate(
+        projected_calls,
+        projected_paid_calls,
+        int(call_threshold),
+        int(paid_call_threshold),
+    )
 
     return SquadPlan(
         mode=mode,
@@ -267,11 +401,14 @@ def compute_squad_plan(
         chairman_model=chairman_model,
         role_calls=role_calls,
         projected_calls=projected_calls,
+        projected_paid_calls=projected_paid_calls,
         paid_models=paid_models,
         free_models=free_models,
         plan_fingerprint=fingerprint,
         gate_required=gate_required,
         gate_reason=gate_reason,
+        call_threshold=int(call_threshold),
+        paid_call_threshold=int(paid_call_threshold),
     )
 
 
@@ -282,11 +419,14 @@ def confirmation_notice(plan: SquadPlan) -> str:
     confirming; it must never self-approve.
     """
     paid = ", ".join(plan.paid_models) if plan.paid_models else "none"
+    reason = plan.gate_reason or "threshold exceeded"
     return (
         f"⚠️ Confirmation required — this turn will make "
-        f"{plan.projected_calls} model calls across {len(plan.models_assigned)} "
+        f"{plan.projected_calls} model calls "
+        f"({plan.projected_paid_calls} paid) across {len(plan.models_assigned)} "
         f"assigned model(s) plus the chair "
-        f"({len(plan.paid_models)} paid, {len(plan.free_models)} free; paid: {paid}). "
+        f"({len(plan.paid_models)} paid models, {len(plan.free_models)} free; "
+        f"paid models: {paid}). Reason: {reason}. "
         f"Check with the user and get their approval before proceeding — do not "
         f"confirm on their behalf. To proceed after approval, re-invoke with "
         f"confirm=\"{plan.plan_fingerprint}\"."

@@ -10,11 +10,14 @@ export interface SquadPlanView {
   chairman_model: string;
   role_calls: Record<string, number>;
   projected_calls: number;
+  projected_paid_calls: number;
   paid_models: string[];
   free_models: string[];
   plan_fingerprint: string;
   gate_required: boolean;
   gate_reason: string | null;
+  call_threshold: number;
+  paid_call_threshold: number;
 }
 
 function stringList(value: unknown): string[] {
@@ -43,6 +46,7 @@ export function parseSquadPlan(raw: unknown): SquadPlanView | null {
   if (!assigned.length && !stringList(row.models_reserved).length && !row.plan_fingerprint) {
     return null;
   }
+  const projectedPaid = Number(row.projected_paid_calls);
   return {
     mode: String(row.mode || ''),
     policy: String(row.policy || 'quorum'),
@@ -51,11 +55,14 @@ export function parseSquadPlan(raw: unknown): SquadPlanView | null {
     chairman_model: String(row.chairman_model || ''),
     role_calls: numberMap(row.role_calls),
     projected_calls: Number.isFinite(projected) ? projected : 0,
+    projected_paid_calls: Number.isFinite(projectedPaid) ? projectedPaid : 0,
     paid_models: stringList(row.paid_models),
     free_models: stringList(row.free_models),
     plan_fingerprint: String(row.plan_fingerprint || ''),
     gate_required: Boolean(row.gate_required),
     gate_reason: row.gate_reason != null ? String(row.gate_reason) : null,
+    call_threshold: Number(row.call_threshold) || 0,
+    paid_call_threshold: Number(row.paid_call_threshold) || 0,
   };
 }
 
@@ -78,11 +85,14 @@ export function squadPlanFromMessage(msg: AssistantMessage | undefined | null): 
     chairman_model: String(meta.chairman_model || msg.stage3?.model || ''),
     role_calls: {},
     projected_calls: 0,
+    projected_paid_calls: 0,
     paid_models: [],
     free_models: [],
     plan_fingerprint: '',
     gate_required: false,
     gate_reason: null,
+    call_threshold: 0,
+    paid_call_threshold: 0,
   };
 }
 

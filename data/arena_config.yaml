@@ -18,5 +18,11 @@ catalog:
   observation_delta_threshold: 0.10
   observation_ttl_days: 60
 
+# Soft-confirm gate for MCP/agent full turns (DEC-030). Interactive Observatory
+# streams bypass the gate. Either threshold can force confirmation.
+squad_gate:
+  call_threshold: 12
+  paid_call_threshold: 4
+
 tag_modifiers:
   free: 0.25

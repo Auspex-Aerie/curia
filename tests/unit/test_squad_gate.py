@@ -107,7 +107,7 @@ async def test_wrong_confirm_re_gates():
 
 
 async def test_small_turn_runs_without_confirm(monkeypatch):
-    # council with 2 arena models -> 5 calls (< 12) -> no gate -> reaches arena.
+    # council with 2 free arena models + paid chair -> 5 calls, 1 paid (< thresholds).
     monkeypatch.setattr("backend.run_turn.run_full_arena", _sentinel_arena)
     small = {"arena_models": ["p/m0:free", "p/m1:free"], "chairman_model": CHAIR}
     with pytest.raises(_ReachedArena):
@@ -115,6 +115,21 @@ async def test_small_turn_runs_without_confirm(monkeypatch):
             conversation_id="c1", content="q", storage_svc=_Storage(),
             settings=small, prepared_ctx=_ctx(), persist=False, schedule_title=False,
         )
+
+
+async def test_paid_call_threshold_gates_cheap_squad(monkeypatch):
+    # Four paid arena models + paid chair → 9 calls (under call_threshold 12)
+    # but 9 paid calls (over paid_call_threshold 4) → gate.
+    paid4 = [f"paid/m{i}" for i in range(4)]
+    settings = {"arena_models": paid4, "chairman_model": "paid/chair"}
+    result = await run_turn(
+        conversation_id="c1", content="q", storage_svc=_Storage(),
+        settings=settings, prepared_ctx=_ctx(), persist=True, schedule_title=False,
+    )
+    assert result.gated is True
+    assert result.response_dict["plan"]["projected_calls"] == 9
+    assert result.response_dict["plan"]["projected_paid_calls"] == 9
+    assert "paid" in (result.response_dict["plan"].get("gate_reason") or "").lower()
 
 
 async def test_enforce_gate_false_bypasses_for_interactive(monkeypatch):
