@@ -1,21 +1,24 @@
-"""Directive parsing for LLM Context Arena.
+"""Directive parsing for Curia turns.
 
 Extracts @directives from user input and returns structured flags.
 
-Supported directives:
+Functional (wired into execution or prompt construction):
     @norag / @raw       - Skip RAG retrieval
     @summarize          - Force context summarization
     @tokenbudget <n>    - Override per-turn context budget
-    @trace / @debug     - Include retrieval metadata
-    @short              - Hint for concise response
-    @detailed           - Hint for detailed response
-    @cite               - Require inline citations
-    @noexecute          - No tool/action execution
-    @reset              - Reset conversation state
-    @temp <0-1>         - Override temperature
-    @maxtokens <n>      - Override max output tokens
-    @iterations <n>     - Override iteration count for complex modes
-    @safe / @relaxed    - Safety level hint
+    @trace / @debug     - Attach retrieval/debug metadata on the assistant turn
+    @short              - Prompt instruction: concise response
+    @detailed           - Prompt instruction: detailed response
+    @cite               - Prompt instruction: cite context as [file:line]
+    @noexecute          - Prompt instruction: reasoning only, no tools
+    @reset              - Reset conversation state (no model run)
+    @temp <0-1>         - Sampling temperature for every model call this turn
+    @maxtokens <n>      - max_tokens for every model call this turn
+    @iterations <n>     - Round Robin pass count
+    @lastchair          - Use previous chairman response as context
+
+Parsed but not enforced (emit a warning; do not advertise as controls):
+    @safe / @relaxed    - No multi-tier safety system exists
 """
 
 from pydantic import BaseModel, Field
@@ -143,7 +146,12 @@ class DirectiveParser:
             elif lower in {"lastchair"}:
                 flags.use_last_chair = True
             elif lower in {"safe", "relaxed"}:
+                # Parsed for compatibility; Curia has no multi-tier safety
+                # controls, so this is not enforced (warn rather than pretend).
                 flags.safety = lower
+                flags.warnings.append(
+                    f"@{lower} is not enforced (no multi-tier safety controls); ignored."
+                )
 
             # Value directives
             elif lower.startswith("tokenbudget"):

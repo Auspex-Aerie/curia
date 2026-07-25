@@ -78,7 +78,9 @@ def _default_encode(texts: Sequence[str]) -> List[List[float]]:
     if _EMBED_MODEL is None:
         from sentence_transformers import SentenceTransformer
 
-        _EMBED_MODEL = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        from ..config import ROUTER_EMBED_MODEL
+
+        _EMBED_MODEL = SentenceTransformer(ROUTER_EMBED_MODEL)
     vectors = _EMBED_MODEL.encode(list(texts), normalize_embeddings=True)
     return [v.tolist() for v in vectors]
 

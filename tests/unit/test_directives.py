@@ -74,6 +74,17 @@ class TestDirectiveParser:
         assert len(flags.warnings) == 1
         assert "Invalid @tokenbudget" in flags.warnings[0]
 
+    def test_parse_safe_warns_not_enforced(self):
+        cleaned, flags = parse_directives("@safe Do something")
+        assert cleaned == "Do something"
+        assert flags.safety == "safe"
+        assert any("not enforced" in w for w in flags.warnings)
+
+    def test_parse_trace(self):
+        cleaned, flags = parse_directives("@trace What used RAG?")
+        assert cleaned == "What used RAG?"
+        assert flags.trace is True
+
     def test_parse_temp_valid(self):
         """@temp=0.5 should set temp_override."""
         text = "@temp=0.5 Creative writing"

@@ -32,8 +32,8 @@ See [`dis-002-mode-turn-routing.md`](dis-002-mode-turn-routing.md). **Remediated
 ### Agent-adjacent plumbing
 - [x] Extract shared `run_turn()` from `send_message()` + `send_message_stream()` (`backend/run_turn.py`)
 - [x] Use `ArenaExecution.to_response_dict()` (`backend/models.py`) for sync + stream final payloads
-- [ ] Wire `@temp` / `@maxtokens` from `ParsedDirectives` → `query_model()` (`openrouter.py`)
-- [ ] Attach `@trace` payload to assistant metadata (context_sources, router category, fusion flags)
+- [x] Wire `@temp` / `@maxtokens` from `ParsedDirectives` → `query_model()` (`openrouter.py` + `sampling.py`, DEC-032)
+- [x] Attach `@trace` payload to assistant metadata (`metadata.retrieval_trace`, DEC-032)
 - [ ] Emit per-model progress in `stage2_collect_rankings()` (`arena.py`)
 - [x] Document Phase 0 tools — see [`agent-control-plane-architecture.md`](agent-control-plane-architecture.md)
 

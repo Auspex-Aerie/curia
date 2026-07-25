@@ -76,7 +76,21 @@ SEMANTIC_BACKEND = os.getenv("SEMANTIC_BACKEND", "colbert").casefold()
 COLBERT_LEARNED = _env_bool("COLBERT_LEARNED", True)
 COLBERT_MODEL = os.getenv("COLBERT_MODEL", "colbert-ir/colbertv2.0")
 COLBERT_DEVICE = os.getenv("COLBERT_DEVICE", "auto")
+# Optional Curia-owned HuggingFace cache root (not Git LFS). Prefer HF_HOME if set.
+CURIA_HF_HOME = os.getenv("CURIA_HF_HOME")
+ROUTER_EMBED_MODEL = os.getenv(
+    "ROUTER_EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+)
 _COLBERT_DEVICE_RESOLVED: Optional[str] = None
+
+# Apply Curia HF cache early so first ColBERT/rerank/router load uses it.
+if CURIA_HF_HOME and not os.getenv("HF_HOME"):
+    try:
+        from .rag.hf_models import configure_hf_cache
+
+        configure_hf_cache(CURIA_HF_HOME)
+    except Exception:
+        logger.debug("CURIA_HF_HOME configuration skipped", exc_info=True)
 
 
 def _cuda_usable_for_colbert() -> bool:
