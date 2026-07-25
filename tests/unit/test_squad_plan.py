@@ -223,6 +223,24 @@ class TestFingerprint:
         b = compute_squad_plan(mode="council", arena_models=_free_squad(5), chairman_model="chair:free")
         assert a.plan_fingerprint != b.plan_fingerprint
 
+    def test_changes_with_reserve_pool(self):
+        # Fingerprint binds failover exposure: extra reserves change the plan id.
+        a = compute_squad_plan(
+            mode="complex_iterative",
+            arena_models=_free_squad(3),
+            chairman_model="chair:free",
+            policy=QUORUM,
+        )
+        b = compute_squad_plan(
+            mode="complex_iterative",
+            arena_models=_free_squad(4),
+            chairman_model="chair:free",
+            policy=QUORUM,
+        )
+        assert a.projected_calls == b.projected_calls == 5
+        assert a.projected_failover_calls != b.projected_failover_calls
+        assert a.plan_fingerprint != b.plan_fingerprint
+
 
 # --- gate -------------------------------------------------------------------
 

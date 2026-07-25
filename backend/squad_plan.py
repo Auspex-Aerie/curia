@@ -231,15 +231,32 @@ def resolve_gate_thresholds() -> Tuple[int, int]:
 
 
 def _fingerprint(
-    mode: str, policy: str, assigned: List[str], chairman: str, projected_calls: int
+    mode: str,
+    policy: str,
+    assigned: List[str],
+    reserved: List[str],
+    chairman: str,
+    projected_calls: int,
+    projected_paid_calls: int,
+    projected_failover_calls: int,
+    projected_failover_paid_calls: int,
 ) -> str:
+    """Stable plan id bound to schedule *and* gate-relevant exposure.
+
+    Includes failover/paid upper bounds so a confirm token cannot be reused
+    for a materially different reserve or cost profile (DEC-031 Greptile).
+    """
     payload = json.dumps(
         {
             "mode": mode,
             "policy": policy,
             "assigned": assigned,
+            "reserved": reserved,
             "chairman": chairman,
             "calls": projected_calls,
+            "paid_calls": projected_paid_calls,
+            "failover_calls": projected_failover_calls,
+            "failover_paid": projected_failover_paid_calls,
         },
         separators=(",", ":"),
         sort_keys=False,
@@ -428,7 +445,15 @@ def compute_squad_plan(
     free_models = [m for m in cost_models if is_free_model(m, free_model_ids)]
 
     fingerprint = _fingerprint(
-        mode, resolved_policy, assigned, chairman_model, projected_calls
+        mode,
+        resolved_policy,
+        assigned,
+        reserved,
+        chairman_model,
+        projected_calls,
+        projected_paid_calls,
+        projected_failover_calls,
+        projected_failover_paid_calls,
     )
     gate_required, gate_reason = _evaluate_gate(
         gate_calls,
