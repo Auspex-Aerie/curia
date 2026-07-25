@@ -1212,6 +1212,10 @@ async def run_mode_complex_iterative(
     ``iterative_schedule`` helper: ``quorum`` runs two extract/expand cycles
     over the first two models (the remainder are reserves); ``require_all``
     rotates every configured model through alternating roles.
+
+    Live reserve substitution (DEC-030 follow-up): under ``quorum``, when an
+    assigned model fails a step and reserves remain, the same role is retried
+    with the next unused reserve. Substitutions are recorded in metadata.
     """
     models = arena_models or ARENA_MODELS
     context_map = context_tokens_map or {}
@@ -1220,6 +1224,13 @@ async def run_mode_complex_iterative(
 
     policy = normalize_policy(squad_policy)
     schedule = iterative_schedule(models, policy)
+    assigned: List[str] = []
+    for _role, model in schedule:
+        if model not in assigned:
+            assigned.append(model)
+    reserve_pool = [m for m in models if m not in assigned]
+    model_failures: List[Dict[str, Any]] = []
+    substitutions: List[Dict[str, Any]] = []
     steps: List[Dict[str, Any]] = []
     summary = ""
     suggested = ""
@@ -1232,23 +1243,57 @@ async def run_mode_complex_iterative(
             prompt = f"Extract: summarize intent and constraints; list key facts; propose the next prompt. Context:\n{user_query}\n\nPrior summary:\n{summary}\nPrior suggested:\n{suggested}"
         else:
             prompt = f"Expand the prior extract; elaborate actionable detail and improve the suggested prompt.\nPrior summary:\n{summary}\nPrior suggested:\n{suggested}"
+
+        active = model
+        substituted_for: Optional[str] = None
         start = time.time()
-        resp = await query_model(model, [{"role": "user", "content": prompt}])
+        resp = await query_model(active, [{"role": "user", "content": prompt}])
         elapsed_ms = int((time.time() - start) * 1000)
-        text = resp.get("content", "") if resp else ""
-        step = apply_usage_fields(
-            {
-                "model": model,
-                "response": text,
-                "role": role,
-                "prompt_preview": prompt[:500],
-                "prompt_full": prompt,
-                "est_tokens": max(len(prompt) // 4, 1),
-                "context_tokens": context_map.get(model, context_map.get("__base__", context_tokens)),
-                "duration_ms": elapsed_ms,
-            },
-            resp,
-        )
+
+        if not is_usable_response(resp) and reserve_pool:
+            model_failures.append(
+                failure_record(active, resp, stage="complex_iterative", role=role)
+            )
+            reserve = reserve_pool.pop(0)
+            start = time.time()
+            reserve_resp = await query_model(reserve, [{"role": "user", "content": prompt}])
+            elapsed_ms = int((time.time() - start) * 1000)
+            reserve_ok = is_usable_response(reserve_resp)
+            if not reserve_ok:
+                # Both assigned and reserve failed — record both for quality/metrics.
+                model_failures.append(
+                    failure_record(reserve, reserve_resp, stage="complex_iterative", role=role)
+                )
+            substitutions.append(
+                {
+                    "role": role,
+                    "failed_model": active,
+                    "reserve_model": reserve,
+                    "reserve_succeeded": reserve_ok,
+                }
+            )
+            substituted_for = active
+            active = reserve
+            resp = reserve_resp
+        elif not is_usable_response(resp):
+            model_failures.append(
+                failure_record(active, resp, stage="complex_iterative", role=role)
+            )
+
+        text = resp.get("content", "") if is_usable_response(resp) else ""
+        step_payload: Dict[str, Any] = {
+            "model": active,
+            "response": text,
+            "role": role,
+            "prompt_preview": prompt[:500],
+            "prompt_full": prompt,
+            "est_tokens": max(len(prompt) // 4, 1),
+            "context_tokens": context_map.get(active, context_map.get("__base__", context_tokens)),
+            "duration_ms": elapsed_ms,
+        }
+        if substituted_for:
+            step_payload["substituted_for"] = substituted_for
+        step = apply_usage_fields(step_payload, resp)
         steps.append(step)
         if role == "extract":
             summary = text or summary
@@ -1261,7 +1306,11 @@ async def run_mode_complex_iterative(
     start = time.time()
     final_resp = await query_model(chairman_model, [{"role": "user", "content": final_prompt}])
     elapsed_ms = int((time.time() - start) * 1000)
-    final_text = final_resp.get("content", "") if final_resp else ""
+    final_text = final_resp.get("content", "") if is_usable_response(final_resp) else ""
+    if not is_usable_response(final_resp):
+        model_failures.append(
+            failure_record(chairman_model, final_resp, stage="complex_iterative", role="chair_final")
+        )
     chair_step = apply_usage_fields(
         {
             "model": chairman_model,
@@ -1281,6 +1330,9 @@ async def run_mode_complex_iterative(
         "mode": "complex_iterative",
         "steps": all_steps,
         "cost": summarize_turn_cost(all_steps),
+        "model_failures": model_failures,
+        "reserve_substitutions": substitutions,
+        "models_reserved_remaining": list(reserve_pool),
     }
     return steps, [], chair_step, metadata
 

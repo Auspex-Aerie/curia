@@ -126,7 +126,7 @@ function renderPlanPreview(msg: AssistantMessage | undefined): string {
       </div>
       <div class="plan-preview-row">
         <span class="plan-k">Calls</span>
-        <span class="plan-v"><b>${plan.projected_calls}</b> projected${plan.gate_required ? ' · gate' : ''}</span>
+        <span class="plan-v"><b>${plan.projected_calls}</b> projected · <b>${plan.projected_paid_calls}</b> paid${plan.gate_required ? ' · gate' : ''}</span>
       </div>
       <div class="plan-preview-row">
         <span class="plan-k">Roster</span>
