@@ -284,6 +284,32 @@ class TestGate:
         assert plan.projected_calls == 19
         assert plan.gate_required is True
 
+    def test_failover_budget_included_in_gate_for_iterative_reserves(self):
+        # quorum iterative: 4 scheduled + chair = 5, 2 reserves → +2 failover → 7.
+        plan = compute_squad_plan(
+            mode="complex_iterative",
+            arena_models=_free_squad(4),
+            chairman_model="chair:free",
+            policy=QUORUM,
+            call_threshold=6,
+            paid_call_threshold=100,
+        )
+        assert plan.projected_calls == 5
+        assert plan.projected_failover_calls == 2
+        assert plan.gate_required is True
+        assert "failover" in (plan.gate_reason or "").lower()
+
+    def test_catalog_free_tag_without_suffix_counts_as_free(self):
+        # Explicit free_model_ids (catalog path) must drive paid weighting.
+        plan = compute_squad_plan(
+            mode="council",
+            arena_models=["prov/zero-price", "prov/m1:free"],
+            chairman_model="chair:free",
+            free_model_ids={"prov/zero-price", "prov/m1:free", "chair:free"},
+        )
+        assert plan.projected_paid_calls == 0
+        assert "prov/zero-price" in plan.free_models
+
 
 # --- notice -----------------------------------------------------------------
 

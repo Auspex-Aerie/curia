@@ -71,6 +71,26 @@ def is_free_model(model_id: str, free_model_ids: Optional[set] = None) -> bool:
     return bool(free_model_ids) and model_id in free_model_ids
 
 
+def resolve_free_model_ids() -> set:
+    """Catalog-derived free model ids (``free`` tag or ``:free`` suffix).
+
+    Used so paid-call weighting honors catalog tags even when callers omit
+    ``free_model_ids`` (production ``run_turn`` path).
+    """
+    free: set = set()
+    try:
+        from .frozen_config import get_frozen_snapshot
+
+        catalog = get_frozen_snapshot().catalog
+        for model_id, entry in (catalog.models or {}).items():
+            tags = list(entry.tags or [])
+            if "free" in tags or ":free" in model_id:
+                free.add(model_id)
+    except Exception:
+        pass
+    return free
+
+
 # --- complex-iterative schedule (shared with the runner) --------------------
 
 _ITERATIVE_ROLES = ("extract", "expand")
@@ -187,6 +207,9 @@ class SquadPlan:
     gate_reason: Optional[str] = None
     call_threshold: int = DEFAULT_CALL_THRESHOLD
     paid_call_threshold: int = DEFAULT_PAID_CALL_THRESHOLD
+    # Worst-case live reserve retries (Complex Iterative quorum); included in gate.
+    projected_failover_calls: int = 0
+    projected_failover_paid_calls: int = 0
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -302,20 +325,21 @@ def _enumerate_calls(
 
 
 def _evaluate_gate(
-    projected_calls: int,
-    projected_paid_calls: int,
+    gate_calls: int,
+    gate_paid_calls: int,
     call_threshold: int,
     paid_call_threshold: int,
 ) -> Tuple[bool, Optional[str]]:
     reasons: List[str] = []
-    if projected_calls > call_threshold:
+    if gate_calls > call_threshold:
         reasons.append(
-            f"projected {projected_calls} model calls exceeds threshold {call_threshold}"
+            f"projected {gate_calls} model calls (incl. failover) exceeds threshold "
+            f"{call_threshold}"
         )
-    if projected_paid_calls > paid_call_threshold:
+    if gate_paid_calls > paid_call_threshold:
         reasons.append(
-            f"projected {projected_paid_calls} paid model calls exceeds threshold "
-            f"{paid_call_threshold}"
+            f"projected {gate_paid_calls} paid model calls (incl. failover) exceeds "
+            f"threshold {paid_call_threshold}"
         )
     if not reasons:
         return False, None
@@ -337,10 +361,15 @@ def compute_squad_plan(
 
     ``iterations`` maps to Round Robin passes (``ctx.directives.iterations_override``);
     ignored by other modes. ``free_model_ids`` is an optional catalog-derived set
-    of ids tagged free (beyond the ``:free`` suffix heuristic).
+    of ids tagged free (beyond the ``:free`` suffix heuristic). When omitted,
+    free ids are resolved from the frozen model catalog.
 
     When thresholds are omitted, reads ``squad_gate`` from the frozen arena
     config (falling back to module defaults).
+
+    Live reserve substitution can add up to ``min(schedule, reserves)`` extra
+    calls under Complex Iterative quorum; those worst-case failover calls are
+    included in the soft-confirm gate so approval covers retries.
     """
     resolved_policy = normalize_policy(policy)
     arena = list(arena_models or [])
@@ -351,6 +380,8 @@ def compute_squad_plan(
             call_threshold = frozen_call
         if paid_call_threshold is None:
             paid_call_threshold = frozen_paid
+    if free_model_ids is None:
+        free_model_ids = resolve_free_model_ids()
 
     assigned, reserved, schedule = _assigned_and_schedule(mode, arena, resolved_policy)
     if schedule is not None:  # Complex Iterative: derive calls from the schedule.
@@ -365,16 +396,29 @@ def compute_squad_plan(
     # Role formula and enumeration must agree; prefer the shared total.
     projected_calls = sum(role_calls.values())
     if len(call_list) != projected_calls:
-        # Keep role_calls total (pinned by the drift-guard tests) and re-derive
-        # paid weight from the enumeration list when lengths match; otherwise
-        # fall back to counting paid models × estimated share is wrong — use
-        # enumeration length as the paid-attribution base and accept a rare
-        # drift until the formulas are re-aligned.
         projected_calls = len(call_list)
 
     projected_paid_calls = sum(
         1 for _role, model in call_list if not is_free_model(model, free_model_ids)
     )
+
+    # Worst-case live reserve retries: each schedule step can fail once and burn
+    # one reserve (in reserve order). Gate on scheduled + failover so approval
+    # covers substitution traffic.
+    if schedule is not None and reserved:
+        failover_budget = min(len(schedule), len(reserved))
+        projected_failover_calls = failover_budget
+        projected_failover_paid_calls = sum(
+            1
+            for model in reserved[:failover_budget]
+            if not is_free_model(model, free_model_ids)
+        )
+    else:
+        projected_failover_calls = 0
+        projected_failover_paid_calls = 0
+
+    gate_calls = projected_calls + projected_failover_calls
+    gate_paid_calls = projected_paid_calls + projected_failover_paid_calls
 
     # Cost signal: paid/free split across assigned arena models plus the chair.
     cost_models = list(assigned)
@@ -387,8 +431,8 @@ def compute_squad_plan(
         mode, resolved_policy, assigned, chairman_model, projected_calls
     )
     gate_required, gate_reason = _evaluate_gate(
-        projected_calls,
-        projected_paid_calls,
+        gate_calls,
+        gate_paid_calls,
         int(call_threshold),
         int(paid_call_threshold),
     )
@@ -409,6 +453,8 @@ def compute_squad_plan(
         gate_reason=gate_reason,
         call_threshold=int(call_threshold),
         paid_call_threshold=int(paid_call_threshold),
+        projected_failover_calls=projected_failover_calls,
+        projected_failover_paid_calls=projected_failover_paid_calls,
     )
 
 
@@ -420,13 +466,19 @@ def confirmation_notice(plan: SquadPlan) -> str:
     """
     paid = ", ".join(plan.paid_models) if plan.paid_models else "none"
     reason = plan.gate_reason or "threshold exceeded"
+    failover = ""
+    if plan.projected_failover_calls:
+        failover = (
+            f" Up to {plan.projected_failover_calls} additional failover call(s) "
+            f"({plan.projected_failover_paid_calls} paid) if reserves are used."
+        )
     return (
         f"⚠️ Confirmation required — this turn will make "
         f"{plan.projected_calls} model calls "
         f"({plan.projected_paid_calls} paid) across {len(plan.models_assigned)} "
         f"assigned model(s) plus the chair "
         f"({len(plan.paid_models)} paid models, {len(plan.free_models)} free; "
-        f"paid models: {paid}). Reason: {reason}. "
+        f"paid models: {paid}).{failover} Reason: {reason}. "
         f"Check with the user and get their approval before proceeding — do not "
         f"confirm on their behalf. To proceed after approval, re-invoke with "
         f"confirm=\"{plan.plan_fingerprint}\"."

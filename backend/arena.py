@@ -1258,12 +1258,18 @@ async def run_mode_complex_iterative(
             start = time.time()
             reserve_resp = await query_model(reserve, [{"role": "user", "content": prompt}])
             elapsed_ms = int((time.time() - start) * 1000)
+            reserve_ok = is_usable_response(reserve_resp)
+            if not reserve_ok:
+                # Both assigned and reserve failed — record both for quality/metrics.
+                model_failures.append(
+                    failure_record(reserve, reserve_resp, stage="complex_iterative", role=role)
+                )
             substitutions.append(
                 {
                     "role": role,
                     "failed_model": active,
                     "reserve_model": reserve,
-                    "reserve_succeeded": is_usable_response(reserve_resp),
+                    "reserve_succeeded": reserve_ok,
                 }
             )
             substituted_for = active

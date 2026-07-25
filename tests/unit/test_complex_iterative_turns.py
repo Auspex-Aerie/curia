@@ -111,3 +111,29 @@ async def test_live_reserve_substitution_on_assigned_failure(monkeypatch):
     # Both failed m0 attempts should appear in attempts before their reserves.
     assert attempts.count("m0") == 2
     assert "m2" in attempts and "m3" in attempts
+
+
+@pytest.mark.asyncio
+async def test_reserve_failure_is_recorded_alongside_assigned(monkeypatch):
+    """When assigned and reserve both fail, both appear in model_failures."""
+
+    async def always_fail(model, messages, timeout=120.0, log_error=True):
+        return {"error_status": 503, "error_message": f"down::{model}"}
+
+    monkeypatch.setattr("backend.arena.query_model", always_fail)
+
+    squad = ["m0", "m1", "m2"]
+    steps, _s2, chair, meta = await run_mode_complex_iterative(
+        "q", None, squad, "chair", squad_policy="quorum"
+    )
+
+    failed_models = {f.get("model") for f in meta["model_failures"]}
+    # First extract: m0 fails, m2 reserve fails too — both recorded.
+    assert "m0" in failed_models
+    assert "m2" in failed_models
+    assert meta["reserve_substitutions"]
+    assert meta["reserve_substitutions"][0]["reserve_succeeded"] is False
+    # Step still attributes to the reserve that was tried last.
+    assert steps[0]["model"] == "m2"
+    assert steps[0].get("substituted_for") == "m0"
+    assert chair["model"] == "chair"
