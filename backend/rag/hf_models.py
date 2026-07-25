@@ -26,7 +26,8 @@ RERANK_HF_ID = os.getenv("RERANK_MODEL", "jinaai/jina-reranker-v3")
 ROUTER_EMBED_HF_ID = os.getenv(
     "ROUTER_EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
 )
-JINA_V3_REVISION = "fddc7b54c1577668c67eeaba36f959eb55181736"
+# Keep in lockstep with backend.rag.rerank.JINA_V3_REVISION (runtime loader).
+from .rerank import JINA_V3_REVISION  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -76,22 +77,31 @@ def rag_model_specs(
 def configure_hf_cache(cache_dir: Optional[str] = None) -> Optional[str]:
     """Point HuggingFace caches at ``CURIA_HF_HOME`` or an explicit path.
 
-    Sets ``HF_HOME`` (and legacy transformer/hub vars) when a Curia-owned cache
-    directory is configured and ``HF_HOME`` is not already set by the operator.
+    When ``cache_dir`` is passed (CLI ``--cache-dir``), it **overrides** any
+    inherited HF cache env vars so the download lands where the operator asked.
+    When only ``CURIA_HF_HOME`` is set, fill missing HF vars without clobbering
+    an already-configured ``HF_HOME``.
     Returns the resolved cache root, or None when using the library default.
     """
+    explicit = cache_dir is not None
     resolved = cache_dir or os.getenv("CURIA_HF_HOME") or os.getenv("HF_HOME")
     if not resolved:
         return None
     path = os.path.expanduser(resolved)
     os.makedirs(path, exist_ok=True)
-    # Only set if operator has not already fixed HF_HOME in the environment
-    # before import — still force CURIA_HF_HOME when explicitly provided.
-    if cache_dir or os.getenv("CURIA_HF_HOME"):
+    hub = os.path.join(path, "hub")
+    transformers = os.path.join(path, "transformers")
+    st = os.path.join(path, "sentence-transformers")
+    if explicit:
+        os.environ["HF_HOME"] = path
+        os.environ["HUGGINGFACE_HUB_CACHE"] = hub
+        os.environ["TRANSFORMERS_CACHE"] = transformers
+        os.environ["SENTENCE_TRANSFORMERS_HOME"] = st
+    elif os.getenv("CURIA_HF_HOME"):
         os.environ.setdefault("HF_HOME", path)
-        os.environ.setdefault("HUGGINGFACE_HUB_CACHE", os.path.join(path, "hub"))
-        os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(path, "transformers"))
-        os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", os.path.join(path, "sentence-transformers"))
+        os.environ.setdefault("HUGGINGFACE_HUB_CACHE", hub)
+        os.environ.setdefault("TRANSFORMERS_CACHE", transformers)
+        os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", st)
     return path
 
 

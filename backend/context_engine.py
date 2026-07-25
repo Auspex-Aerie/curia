@@ -131,6 +131,36 @@ class ContextEngine:
                 warnings=list(directives.warnings),
             )
 
+        # Apply @temp/@maxtokens to summarizer calls during budget construction.
+        from .sampling import sampling_overrides
+
+        with sampling_overrides(
+            temperature=directives.temp_override,
+            max_tokens=directives.maxtokens_override,
+        ):
+            return await self._prepare_context_body(
+                conversation_id=conversation_id,
+                clean_query=clean_query,
+                directives=directives,
+                mode=mode,
+                manual_context=manual_context,
+                conversation=conversation,
+                models=models,
+                chairman_model=chairman_model,
+            )
+
+    async def _prepare_context_body(
+        self,
+        *,
+        conversation_id: str,
+        clean_query: str,
+        directives,
+        mode: str,
+        manual_context: List[Dict[str, Any]],
+        conversation: Optional[Dict[str, Any]],
+        models: List[str],
+        chairman_model: str,
+    ) -> ContextResult:
         context_block = ""
         context_sources: List[Dict[str, Any]] = []
         context_from_last_chair = False

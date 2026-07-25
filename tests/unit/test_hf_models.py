@@ -22,3 +22,21 @@ def test_configure_hf_cache_sets_env(tmp_path, monkeypatch):
     import os
 
     assert os.environ["HF_HOME"] == str(root)
+
+
+def test_configure_hf_cache_explicit_overrides_existing(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.setenv("HF_HOME", "/old/cache")
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", "/old/hub")
+    root = tmp_path / "forced"
+    configure_hf_cache(str(root))
+    assert os.environ["HF_HOME"] == str(root)
+    assert os.environ["HUGGINGFACE_HUB_CACHE"] == str(root / "hub")
+
+
+def test_jina_revision_matches_runtime_loader():
+    from backend.rag.hf_models import JINA_V3_REVISION
+    from backend.rag.rerank import JINA_V3_REVISION as RUNTIME
+
+    assert JINA_V3_REVISION == RUNTIME

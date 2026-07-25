@@ -177,15 +177,22 @@ class TurnService:
             raise ValueError("Turn awaits user input; use resume (Phase 2)")
 
         ckpt = turn.checkpoint
+        dirs = ckpt.directives or {}
+        from .sampling import sampling_overrides
+
         try:
-            if turn.step_index == 0:
-                turn = await self._run_stage1(turn)
-            elif turn.step_index == 1:
-                turn = await self._run_stage2(turn)
-            elif turn.step_index == 2:
-                turn = await self._run_stage3(turn)
-            else:
-                raise ValueError("Invalid step index")
+            with sampling_overrides(
+                temperature=dirs.get("temp_override"),
+                max_tokens=dirs.get("maxtokens_override"),
+            ):
+                if turn.step_index == 0:
+                    turn = await self._run_stage1(turn)
+                elif turn.step_index == 1:
+                    turn = await self._run_stage2(turn)
+                elif turn.step_index == 2:
+                    turn = await self._run_stage3(turn)
+                else:
+                    raise ValueError("Invalid step index")
         except Exception as exc:
             logger.exception("Turn advance failed (convo=%s turn=%s)", conversation_id, turn_id)
             turn.status = TurnStatus.FAILED
