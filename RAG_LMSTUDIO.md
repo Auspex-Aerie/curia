@@ -41,6 +41,18 @@ ColBERT (default) and Jina/BGE rerank run locally via `pylate` and `sentence-tra
 - `SEMANTIC_BACKEND` — `colbert` (default) or `biencoder`
 - `COLBERT_LEARNED` (default `true`), `COLBERT_MODEL` (default `colbert-ir/colbertv2.0`)
 - `COLBERT_DEVICE` (default `auto`) — `auto` uses CUDA when available, else CPU; override with `cuda` or `cpu`
+- `ROUTER_EMBED_MODEL` (default `sentence-transformers/all-MiniLM-L6-v2`) — embedding query router backbone
+- `CURIA_HF_HOME` — optional cache root for HuggingFace downloads (sets `HF_HOME` when unset). **Not Git LFS**; weights are pulled from the Hub.
+
+### Prefetch retrieval models (recommended)
+
+```bash
+uv run curia-prefetch-rag
+# or with an isolated cache:
+uv run curia-prefetch-rag --cache-dir ~/.cache/curia-hf
+```
+
+Pulls ColBERT, the cross-encoder reranker, and the router embedder into the HF cache so the first grounded deliberation does not block on multi-GB downloads.
 
 ### Fusion, graph, routing
 - `QUERY_ROUTER` (default `embedding`) — `embedding` | `regex`

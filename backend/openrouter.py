@@ -121,13 +121,20 @@ class OpenRouterClient:
         *,
         timeout: float,
         log_error: bool,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> ModelPayload:
+        body: ModelPayload = {"model": model, "messages": list(messages)}
+        if temperature is not None:
+            body["temperature"] = temperature
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
         try:
             async with self.client_factory(timeout=timeout) as client:
                 response = await client.post(
                     self.endpoint,
                     headers=self._headers(),
-                    json={"model": model, "messages": list(messages)},
+                    json=body,
                 )
         except Exception as exc:
             return self._transport_failure(model, exc, log_error=log_error)
@@ -199,13 +206,27 @@ async def query_model(
     messages: list[Message],
     timeout: float = 120.0,
     log_error: bool = True,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> ModelPayload:
-    """Execute one model completion through the default OpenRouter transport."""
+    """Execute one model completion through the default OpenRouter transport.
+
+    When ``temperature`` / ``max_tokens`` are omitted, any active turn-level
+    overrides from ``backend.sampling`` (``@temp`` / ``@maxtokens``) apply.
+    """
+    from .sampling import current_max_tokens, current_temperature
+
+    if temperature is None:
+        temperature = current_temperature()
+    if max_tokens is None:
+        max_tokens = current_max_tokens()
     return await OpenRouterClient().complete(
         model,
         messages,
         timeout=timeout,
         log_error=log_error,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
 
 

@@ -50,6 +50,7 @@ torch = { index = "pytorch-cu126" }
 
 [project.scripts]
 curia-mcp = "mcp_arena.server:main"
+curia-prefetch-rag = "backend.rag.hf_models:main"
 arena-mcp = "mcp_arena.server:main"  # deprecated alias — remove after DEF-011 grace period
 
 [project.urls]

@@ -68,7 +68,15 @@ cd frontend && npm run dev                              # Observatory (separate 
 
 Regardless of install path, two steps happen the first time you use code grounding — the API and Observatory start fine without them, but grounded deliberation does not work until they complete:
 
-- **Model downloads (automatic, on first grounded query).** The default retrieval path lazily downloads its models from HuggingFace — the PyLate ColBERT model (`colbert-ir/colbertv2.0`), the `jinaai/jina-reranker-v3` cross-encoder (loaded with `trust_remote_code`), and a sentence-transformers backbone. This is several GB and needs internet, so the first grounded query is slow. The device is auto-detected (`COLBERT_DEVICE=auto`) and falls back to CPU when CUDA is unavailable.
+- **Model downloads from HuggingFace (not Git LFS).** Retrieval weights live on the HuggingFace Hub — PyLate ColBERT (`colbert-ir/colbertv2.0`), `jinaai/jina-reranker-v3`, and the query-router backbone (`sentence-transformers/all-MiniLM-L6-v2`). They are **not** vendored in this repo. Prefetch before the first grounded query to avoid multi-GB cold starts mid-turn:
+
+```bash
+uv run curia-prefetch-rag
+# optional dedicated cache:
+CURIA_HF_HOME=~/.cache/curia-hf uv run curia-prefetch-rag --cache-dir ~/.cache/curia-hf
+```
+
+Without prefetch, the first grounded query downloads lazily. Device is auto-detected (`COLBERT_DEVICE=auto`) with CPU fallback.
 - **Repository indexing.** Grounding is empty until you point Curia at a repository and index it: set its `repo_root` (Observatory settings, persisted to `data/config.json`) and trigger indexing from the Observatory, or over MCP (`get_index_manifest` → `reindex`). Indexing builds a per-conversation snapshot from the configured Git working tree or an uploaded ZIP.
 
 ## The Observatory
@@ -189,12 +197,15 @@ Directives are removed from the user text before prompting.
 | `@lastchair` | When one exists, use the previous chairman response as context and skip retrieval |
 | `@tokenbudget <n>` | Cap the per-model prompt budget for the turn |
 | `@iterations <n>` | Set the number of Round Robin squad passes |
+| `@temp <0–1>` | Sampling temperature for every model call on this turn |
+| `@maxtokens <n>` | `max_tokens` for every model call on this turn |
+| `@trace` / `@debug` | Attach retrieval/debug detail on the assistant turn (`metadata.retrieval_trace`) |
 | `@short` / `@detailed` | Add a response-length instruction to model prompts |
 | `@cite` | Ask models to cite supplied context as `[file:line]` |
 | `@noexecute` | Add a reasoning-only, no-tools instruction to model prompts |
 | `@reset` | Clear the conversation state instead of running a turn |
 
-Prompt-level instructions are requests to the selected models, not independently enforced policy controls.
+Prompt-level instructions (`@short`, `@detailed`, `@cite`, `@noexecute`) are requests to the selected models, not independently enforced policy controls. `@safe` / `@relaxed` are **not** supported (no multi-tier safety system); they parse only to emit a warning.
 
 ## Agent control with MCP
 

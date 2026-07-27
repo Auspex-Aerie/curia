@@ -122,6 +122,8 @@ def _assistant_metadata(
         "summarize_jobs": metadata.get("summarize_jobs") or [],
         "budget_decisions": metadata.get("budget_decisions") or {},
         "observation_pending": metadata.get("observation_pending") or [],
+        "retrieval_trace": metadata.get("retrieval_trace"),
+        "reserve_substitutions": metadata.get("reserve_substitutions"),
     }
 
 
@@ -249,20 +251,29 @@ async def run_turn(
     elif is_first_message and schedule_title:
         title_task = asyncio.create_task(generate_conversation_title(ctx.clean_query))
 
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_arena(
-        ctx.base_prompt,
-        ctx.per_model_prompts if ctx.per_model_prompts else None,
-        mode=mode,
-        arena_models=arena_models,
-        chairman_model=chairman_model,
-        iterations=ctx.directives.iterations_override,
-        context_tokens=context_tokens,
-        context_tokens_map=ctx.context_token_map,
-        progress_cb=progress_cb,
-        squad_policy=resolved_policy,
-    )
+    from .sampling import sampling_overrides
 
-    metadata["directives"] = ctx.directives.dict()
+    directives = ctx.directives
+    with sampling_overrides(
+        temperature=getattr(directives, "temp_override", None),
+        max_tokens=getattr(directives, "maxtokens_override", None),
+    ):
+        stage1_results, stage2_results, stage3_result, metadata = await run_full_arena(
+            ctx.base_prompt,
+            ctx.per_model_prompts if ctx.per_model_prompts else None,
+            mode=mode,
+            arena_models=arena_models,
+            chairman_model=chairman_model,
+            iterations=getattr(directives, "iterations_override", None),
+            context_tokens=context_tokens,
+            context_tokens_map=ctx.context_token_map,
+            progress_cb=progress_cb,
+            squad_policy=resolved_policy,
+        )
+
+    metadata["directives"] = (
+        directives.dict() if hasattr(directives, "dict") else {}
+    )
     metadata["squad_policy"] = squad_plan.policy
     metadata["models_assigned"] = squad_plan.models_assigned
     metadata["models_reserved"] = squad_plan.models_reserved
@@ -271,6 +282,30 @@ async def run_turn(
     metadata["mode"] = mode
     metadata["arena_squad"] = settings.get("arena_squad")
     metadata["context_from_last_chair"] = ctx.context_from_last_chair
+    if getattr(directives, "trace", False):
+        # Explicit @trace/@debug: attach retrieval/debug detail for Observatory/MCP.
+        from .config import (
+            FUSION_MODE,
+            QUERY_ROUTER,
+            RERANK_MODEL,
+            SEMANTIC_BACKEND,
+        )
+
+        metadata["retrieval_trace"] = {
+            "rag_used": bool(getattr(ctx, "rag_used", False)),
+            "skip_rag": bool(getattr(directives, "skip_rag", False)),
+            "force_summarize": bool(getattr(directives, "force_summarize", False)),
+            "budget_override": getattr(directives, "budget_override", None),
+            "context_from_last_chair": bool(ctx.context_from_last_chair),
+            "context_source_count": len(ctx.context_sources or []),
+            "context_sources": list(ctx.context_sources or []),
+            "semantic_backend": SEMANTIC_BACKEND,
+            "fusion_mode": FUSION_MODE,
+            "query_router": QUERY_ROUTER,
+            "rerank_model": RERANK_MODEL,
+            "temp_override": getattr(directives, "temp_override", None),
+            "maxtokens_override": getattr(directives, "maxtokens_override", None),
+        }
     if ctx.summarize_targets:
         metadata["summarize_targets"] = ctx.summarize_targets
     if ctx.budget_decisions:
