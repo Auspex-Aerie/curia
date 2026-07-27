@@ -67,16 +67,16 @@ Third-party weights (**do not re-host** unless you fine-tune):
 - `jinaai/jina-reranker-v3`
 - `sentence-transformers/all-MiniLM-L6-v2`
 
-Auspex-owned / first-party:
+Auspex-owned / first-party (planned Hub publications):
 
-| HF id | Type | Contents |
-|-------|------|----------|
-| `Auspex-Aerie/curia-grounding-config` | model (config + card) | Default stack recipe Curia loads; cites upstream ids |
-| `Auspex-Aerie/curia-router-labels` | dataset | Query → intent labels for the embedding router |
+| HF id | Type | Contents | Runtime today |
+|-------|------|----------|---------------|
+| `Auspex-Aerie/curia-grounding-config` | model (config + card) | Documented default stack recipe; cites upstream ColBERT / Jina / MiniLM ids | **Not loaded by Curia yet.** App defaults live in `backend/config.py` and env (`COLBERT_MODEL`, `RERANK_MODEL`, …). This Hub artifact is documentation + a future optional remote recipe, not current config source of truth. |
+| `Auspex-Aerie/curia-router-labels` | dataset | Query → intent labels (export of `backend/rag/router_training.json`) | Labels ship **in-repo** today; Hub dataset is a public mirror for reuse and collection completeness. |
 
 Optional later: `Auspex-Aerie/curia-router` (fine-tuned embedder). Same **collection** `curia`.
 
-Runtime still prefetches upstream models via `uv run curia-prefetch-rag`; the Hub config card documents *which* ids and revisions that means.
+Runtime still prefetches **upstream third-party** weights via `uv run curia-prefetch-rag` (local HF cache). Publishing `curia-grounding-config` does **not** by itself change what Curia loads until a future change optionally consumes that Hub recipe.
 
 ---
 
