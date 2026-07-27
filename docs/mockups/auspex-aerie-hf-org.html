@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Auspex-Aerie · Hugging Face org (mockup)</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --surface: #111827;
+      --surface2: #1a2234;
+      --border: #2a3548;
+      --text: #e8eef7;
+      --muted: #8b9bb4;
+      --accent: #ff9f1c;
+      --accent2: #3dd6c6;
+      --ok: #6bcf8e;
+      --chip: #243044;
+      --link: #7eb6ff;
+      --shadow: 0 12px 40px #0008;
+      --radius: 12px;
+      --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2740 0%, transparent 55%),
+                  radial-gradient(900px 500px at 90% 0%, #1c2a22 0%, transparent 50%),
+                  var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      min-height: 100vh;
+    }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .banner {
+      background: linear-gradient(90deg, #1e2a1a, #2a2110);
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+      padding: 10px 20px;
+      text-align: center;
+    }
+    .banner b { color: var(--accent); }
+    .topnav {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 12px 28px;
+      border-bottom: 1px solid var(--border);
+      background: #0d121cdd;
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .logo {
+      font-weight: 750;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+    }
+    .logo span {
+      width: 22px; height: 22px; border-radius: 6px;
+      background: linear-gradient(135deg, var(--accent), #ff5e3a);
+      display: inline-block;
+    }
+    .nav-muted { color: var(--muted); font-size: 14px; }
+    .search {
+      margin-left: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 7px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      min-width: 220px;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px 20px 64px;
+    }
+    .org-head {
+      display: grid;
+      grid-template-columns: 96px 1fr auto;
+      gap: 20px;
+      align-items: start;
+      margin-bottom: 28px;
+    }
+    .avatar {
+      width: 96px; height: 96px;
+      border-radius: 18px;
+      background:
+        linear-gradient(145deg, #2a3d28 0%, #1a2438 45%, #3a2a18 100%);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      display: grid;
+      place-items: center;
+      font-size: 34px;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: -0.04em;
+    }
+    .org-head h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+    }
+    .handle { color: var(--muted); font-size: 15px; margin-bottom: 10px; }
+    .bio { color: #c5d0e0; font-size: 15px; max-width: 58ch; margin: 0 0 12px; }
+    .meta-row {
+      display: flex; flex-wrap: wrap; gap: 14px;
+      color: var(--muted); font-size: 13px;
+    }
+    .meta-row strong { color: var(--text); font-weight: 650; }
+    .follow {
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 16px;
+      font: inherit;
+      font-weight: 600;
+      cursor: default;
+    }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 22px;
+      overflow-x: auto;
+    }
+    .tab {
+      padding: 10px 14px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+    }
+    .tab.on {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+    .tab .n {
+      background: var(--chip);
+      border-radius: 999px;
+      padding: 1px 7px;
+      font-size: 11px;
+      margin-left: 4px;
+      color: var(--muted);
+    }
+    .section-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin: 8px 0 14px;
+    }
+    .section-title h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .section-title span { color: var(--muted); font-size: 13px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 14px;
+      margin-bottom: 36px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 16px 14px;
+      box-shadow: 0 4px 18px #0004;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 168px;
+    }
+    .card.coming {
+      border-style: dashed;
+      opacity: 0.88;
+      background: #0f1520;
+    }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .kind {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent2);
+      font-weight: 700;
+    }
+    .card.coming .kind { color: var(--muted); }
+    .card h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .card h3 code {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 650;
+      color: #d7e4ff;
+    }
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      flex: 1;
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chip {
+      background: var(--chip);
+      border: 1px solid #334155;
+      color: #a8b8d0;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+    .chip.hot {
+      border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+      color: #ffd19a;
+    }
+    .chip.ok {
+      border-color: color-mix(in srgb, var(--ok) 35%, var(--border));
+      color: #b6ebc8;
+    }
+    .card-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 18px 16px;
+      margin-bottom: 28px;
+    }
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 16px;
+    }
+    .panel ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .panel li { margin-bottom: 6px; }
+    .panel li strong { color: var(--text); }
+    .note {
+      border-left: 3px solid var(--accent);
+      padding: 10px 14px;
+      background: #1a160e;
+      border-radius: 0 8px 8px 0;
+      color: #e6d4b0;
+      font-size: 13px;
+      margin-top: 14px;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 800px) {
+      .org-head { grid-template-columns: 72px 1fr; }
+      .follow { grid-column: 1 / -1; }
+      .two-col { grid-template-columns: 1fr; }
+    }
+    .file-tree {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #9fb2cc;
+      background: #0a0e16;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.55;
+    }
+    .file-tree .dir { color: var(--accent2); }
+    .file-tree .file { color: #c5d4ea; }
+    .file-tree .dim { color: #5c6b82; }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    <b>Mockup only</b> — not live Hugging Face · illustrates
+    <code style="color:#ffd19a">huggingface.co/Auspex-Aerie</code>
+    as a multi-product lab (DEC-033)
+  </div>
+
+  <header class="topnav">
+    <div class="logo"><span></span> Hugging Face</div>
+    <span class="nav-muted">Models</span>
+    <span class="nav-muted">Datasets</span>
+    <span class="nav-muted">Spaces</span>
+    <span class="nav-muted">Collections</span>
+    <div class="search">Search models, datasets, users…</div>
+  </header>
+
+  <main class="wrap">
+    <section class="org-head">
+      <div class="avatar" aria-hidden="true">AA</div>
+      <div>
+        <h1>Auspex Aerie</h1>
+        <div class="handle">@Auspex-Aerie · Organization</div>
+        <p class="bio">
+          Models and datasets from <strong>Auspex Labs</strong> — multi-model deliberation
+          (<strong>Curia</strong>), network anomaly detection, domain risk, brand protection,
+          and neural text compression. Open weights and recipes where we can; cite upstream
+          Hub models rather than re-hosting them.
+        </p>
+        <div class="meta-row">
+          <span><strong>5</strong> collections</span>
+          <span><strong>2</strong> models</span>
+          <span><strong>1</strong> dataset</span>
+          <span>GitHub · <a href="https://github.com/Auspex-Aerie">Auspex-Aerie</a></span>
+        </div>
+      </div>
+      <button type="button" class="follow">Follow</button>
+    </section>
+
+    <nav class="tabs" aria-label="Org sections">
+      <div class="tab on">Collections <span class="n">5</span></div>
+      <div class="tab">Models <span class="n">2</span></div>
+      <div class="tab">Datasets <span class="n">1</span></div>
+      <div class="tab">Spaces <span class="n">0</span></div>
+      <div class="tab">About</div>
+    </nav>
+
+    <div class="section-title">
+      <h2>Collections</h2>
+      <span>One shelf per product family — not a single “code RAG” org</span>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <div class="card-top">
+          <span class="kind">Collection · live</span>
+          <span class="chip ok">2 artifacts</span>
+        </div>
+        <h3>curia</h3>
+        <p>Multi-model deliberation. Grounding recipe + router labels. App:
+          <a href="https://github.com/Auspex-Aerie/curia">Auspex-Aerie/curia</a>.</p>
+        <div class="chips">
+          <span class="chip hot">curia</span>
+          <span class="chip">deliberation</span>
+          <span class="chip">code-grounding</span>
+        </div>
+        <div class="card-foot"><span>Updated mock</span><span>Open collection →</span></div>
+      </article>
+
+      <article class="card coming">
+        <div class="card-top">
+          <span class="kind">Collection · planned</span>
+          <span class="chip">coming soon</span>
+        </div>
+        <h3>netflow-anomaly</h3>
+        <p>Netflow / traffic anomaly scoring models and eval sets. Empty shelf on purpose so the org is not Curia-only.</p>
+        <div class="chips">
+          <span class="chip">netflow</span>
+          <span class="chip">anomaly-detection</span>
+        </div>
+        <div class="card-foot"><span>No public models yet</span><span>—</span></div>
+      </article>
+
+      <article class="card coming">
+        <div class="card-top">
+          <span class="kind">Collection · planned</span>
+          <span class="chip">coming soon</span>
+        </div>
+        <h3>domain-lexicon</h3>
+        <p>Lexical malicious / suspicious domain predictors (character &amp; token features).</p>
+        <div class="chips">
+          <span class="chip">domain</span>
+          <span class="chip">security</span>
+        </div>
+        <div class="card-foot"><span>No public models yet</span><span>—</span></div>
+      </article>
+
+      <article class="card coming">
+        <div class="card-top">
+          <span class="kind">Collection · planned</span>
+          <span class="chip">coming soon</span>
+        </div>
+        <h3>brand-protection</h3>
+        <p>Spoof / lookalike detection for brand abuse and phishing twins.</p>
+        <div class="chips">
+          <span class="chip">brand-protection</span>
+          <span class="chip">spoof</span>
+        </div>
+        <div class="card-foot"><span>No public models yet</span><span>—</span></div>
+      </article>
+
+      <article class="card coming">
+        <div class="card-top">
+          <span class="kind">Collection · planned</span>
+          <span class="chip">coming soon</span>
+        </div>
+        <h3>text-compression</h3>
+        <p>Neural text compressors for long-context pipelines (rate–distortion oriented).</p>
+        <div class="chips">
+          <span class="chip">compression</span>
+          <span class="chip">nlp</span>
+        </div>
+        <div class="card-foot"><span>No public models yet</span><span>—</span></div>
+      </article>
+    </div>
+
+    <div class="section-title">
+      <h2>Models</h2>
+      <span>Id pattern: <code style="color:#c5d4ea">Auspex-Aerie/&lt;product&gt;-&lt;role&gt;[-vN]</code></span>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <div class="card-top">
+          <span class="kind">Model · config card</span>
+          <span class="chip hot">planned recipe</span>
+        </div>
+        <h3><code>curia-grounding-config</code></h3>
+        <p>
+          Published <strong>stack recipe</strong> (JSON + model card) citing upstream Hub models.
+          <strong>Not loaded by Curia runtime today</strong> — defaults remain
+          <code style="color:#9fb2cc">backend/config.py</code> / env until optional remote recipe load ships.
+        </p>
+        <div class="chips">
+          <span class="chip">config</span>
+          <span class="chip">apache-2.0</span>
+          <span class="chip">curia</span>
+        </div>
+        <div class="card-foot"><span>0 downloads (mock)</span><span>Updated mock</span></div>
+      </article>
+
+      <article class="card coming">
+        <div class="card-top">
+          <span class="kind">Model · weights</span>
+          <span class="chip">later</span>
+        </div>
+        <h3><code>curia-router</code></h3>
+        <p>Future fine-tuned intent router (if we train one). Until then, backbone is upstream MiniLM + in-repo labels.</p>
+        <div class="chips">
+          <span class="chip">feature-extraction</span>
+          <span class="chip">curia</span>
+        </div>
+        <div class="card-foot"><span>Not published</span><span>—</span></div>
+      </article>
+    </div>
+
+    <div class="section-title">
+      <h2>Datasets</h2>
+      <span>Public mirrors; app may still ship copies in-repo</span>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <div class="card-top">
+          <span class="kind">Dataset</span>
+          <span class="chip ok">mirror of in-repo JSON</span>
+        </div>
+        <h3><code>curia-router-labels</code></h3>
+        <p>Query → intent categories for Curia’s embedding query router. Source: <code style="color:#9fb2cc">backend/rag/router_training.json</code>.</p>
+        <div class="chips">
+          <span class="chip">text-classification</span>
+          <span class="chip">curia</span>
+          <span class="chip">apache-2.0</span>
+        </div>
+        <div class="card-foot"><span>~small JSON</span><span>Updated mock</span></div>
+      </article>
+    </div>
+
+    <div class="two-col">
+      <section class="panel">
+        <h2>Inside <code style="font-size:13px;color:#9fb2cc">curia-grounding-config</code> (recipe only)</h2>
+        <div class="file-tree"><span class="dir">curia-grounding-config/</span>
+├── <span class="file">README.md</span>          <span class="dim"># card: what Curia uses by default</span>
+├── <span class="file">config.json</span>         <span class="dim"># product, version, stack pointers</span>
+└── <span class="file">stack.defaults.json</span> <span class="dim"># semantic / rerank / router / fusion</span>
+
+<span class="dim"># Does NOT contain multi-GB ColBERT or Jina weights</span>
+<span class="dim"># Those stay at colbert-ir/* and jinaai/* — prefetch locally</span></div>
+        <div class="note">
+          <strong>Naming rule:</strong> product + role in the id
+          (<code>curia-grounding-config</code>). Thresholds, revisions, RRF/graph knobs live in JSON —
+          never in the repo name.
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>What we do <em>not</em> put under Auspex-Aerie</h2>
+        <ul>
+          <li><strong>Re-uploads</strong> of <code>colbert-ir/colbertv2.0</code>, Jina v3, MiniLM — cite + prefetch</li>
+          <li><strong>Git LFS</strong> blobs inside application git repos</li>
+          <li><strong>Kitchen-sink names</strong> encoding every hyperparameter</li>
+          <li><strong>A lone CodeRAG org</strong> that hides netflow / domain / brand / compression lines</li>
+        </ul>
+        <div class="note" style="border-color:#3dd6c6;background:#0e1a1a;color:#b8e6df">
+          Operators: <code>uv run curia-prefetch-rag</code> fills the local HF cache from upstream Hub ids
+          (see <code>docs/hf_hub.md</code>, DEC-033).
+        </div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h2>About (org README sketch)</h2>
+      <ul>
+        <li><strong>Curia</strong> — multi-model deliberation grounded in code → collection <em>curia</em></li>
+        <li><strong>Netflow anomaly</strong> — traffic / flow scoring → collection <em>netflow-anomaly</em></li>
+        <li><strong>Domain lexicon</strong> — lexical domain risk → collection <em>domain-lexicon</em></li>
+        <li><strong>Brand protection</strong> — spoof / lookalike → collection <em>brand-protection</em></li>
+        <li><strong>Text compression</strong> — neural compressors → collection <em>text-compression</em></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
