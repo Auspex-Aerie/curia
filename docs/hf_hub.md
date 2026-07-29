@@ -73,10 +73,10 @@ Auspex-owned / first-party (planned Hub publications):
 
 | HF id | Type | Contents | Runtime today |
 |-------|------|----------|---------------|
-| `Auspex-Aerie/curia-grounding-config` | model (config + card) | Documented default stack recipe; cites upstream ColBERT / Jina / MiniLM ids | **Not loaded by Curia yet.** App defaults live in `backend/config.py` and env (`COLBERT_MODEL`, `RERANK_MODEL`, …). This Hub artifact is documentation + a future optional remote recipe, not current config source of truth. |
-| `Auspex-Aerie/curia-router-labels` | dataset | Query → intent labels (export of `backend/rag/router_training.json`) | Labels ship **in-repo** today; Hub dataset is a public mirror for reuse and collection completeness. |
+| `auspex-aerie/curia-grounding-config` | model (config + card) | Documented default stack recipe; cites upstream ColBERT / Jina / MiniLM ids | **Not loaded by Curia yet.** App defaults live in `backend/config.py` and env (`COLBERT_MODEL`, `RERANK_MODEL`, …). This Hub artifact is documentation + a future optional remote recipe, not current config source of truth. |
+| `auspex-aerie/curia-router-labels` | dataset | Query → intent labels (export of `backend/rag/router_training.json`) | Labels ship **in-repo** today; Hub dataset is a public mirror for reuse and collection completeness. |
 
-Optional later: `Auspex-Aerie/curia-router` (fine-tuned embedder). Same **collection** `curia`.
+Optional later: `auspex-aerie/curia-router` (fine-tuned embedder). Same **Curia** collection.
 
 Runtime still prefetches **upstream third-party** weights via `uv run curia-prefetch-rag` (local HF cache). Publishing `curia-grounding-config` does **not** by itself change what Curia loads until a future change optionally consumes that Hub recipe.
 
@@ -84,7 +84,7 @@ Runtime still prefetches **upstream third-party** weights via `uv run curia-pref
 
 ## Org profile copy (suggested)
 
-**Name:** Auspex Aerie  
+**Display name:** Auspex Aerie · **handle:** `auspex-aerie`  
 
 **Bio (short):**  
 Models and datasets from Auspex Labs — multi-model deliberation (Curia), network anomaly detection, domain risk, brand protection, and neural text compression.
