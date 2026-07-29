@@ -1,0 +1,7 @@
+{
+  "model_type": "curia_grounding_config",
+  "architectures": [],
+  "product": "curia",
+  "version": 1,
+  "stack_file": "stack.defaults.json"
+}
