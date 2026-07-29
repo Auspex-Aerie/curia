@@ -55,3 +55,16 @@ def test_patch_catalog_model_endpoint(tmp_path, monkeypatch):
     assert data["ok"] is True
     assert data["entry"]["tags"] == ["free"]
     assert data["entry"]["model_modifier"] == 0.75
+
+
+def test_pending_observations_include_exceeds_threshold(client):
+    """Settings Catalog UI needs exceeds_threshold on each pending row (DEC-035)."""
+    resp = client.get("/api/catalog/observations/pending")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "pending" in data
+    assert "delta_threshold" in data
+    for item in data["pending"]:
+        assert "exceeds_threshold" in item
+        assert isinstance(item["exceeds_threshold"], bool)
+
