@@ -1,6 +1,8 @@
 # Auspex-Aerie on Hugging Face
 
-**Org slug:** [`Auspex-Aerie`](https://huggingface.co/Auspex-Aerie) (same as GitHub).  
+**Hub account:** [`auspex-aerie`](https://huggingface.co/auspex-aerie) (Hugging Face **user** namespace today).  
+**GitHub org:** [`Auspex-Aerie`](https://github.com/Auspex-Aerie) — same brand; if you later create an HF *Organization* with that casing, transfer repos and update ids.
+
 **Not** a Curia-only shelf. Curia is one product; the Hub presence should read as a lab with several lines of work.
 
 Weights are **never** Git LFS in application repos. First-party weights and datasets go to the Hub; Curia (and future apps) pull them by id.

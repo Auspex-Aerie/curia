@@ -1,0 +1,59 @@
+{
+  "product": "curia",
+  "artifact": "grounding-config",
+  "version": 1,
+  "description": "Default CodeRAG / grounding stack recipe for Curia. Documentation and a future optional remote recipe — not consumed by Curia runtime today.",
+  "runtime_status": "published_recipe_only",
+  "runtime_source_of_truth": "backend/config.py and environment variables in the Curia repository",
+  "semantic": {
+    "backend": "colbert",
+    "colbert_learned": true,
+    "model": "colbert-ir/colbertv2.0",
+    "device": "auto"
+  },
+  "router": {
+    "mode": "embedding",
+    "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "labels_dataset": "auspex-aerie/curia-router-labels",
+    "labels_path_in_repo": "backend/rag/router_training.json"
+  },
+  "fusion": {
+    "mode": "rrf"
+  },
+  "graph": {
+    "mode": "append"
+  },
+  "rerank": {
+    "enabled": true,
+    "model": "jinaai/jina-reranker-v3",
+    "revision": "10fb694fc21f7a710a563ff1eb977a460f3868e4"
+  },
+  "retrieval": {
+    "retrieve_candidates": 50,
+    "rerank_top_k": 20,
+    "context_chunk_cap": 60
+  },
+  "prefetch": {
+    "cli": "uv run curia-prefetch-rag",
+    "cache_env": ["CURIA_HF_HOME", "HF_HOME"]
+  },
+  "upstream": {
+    "note": "Do not re-host multi-GB third-party weights under Auspex-Aerie unless fine-tuned by Auspex. Cite and prefetch from the ids above.",
+    "models": [
+      "colbert-ir/colbertv2.0",
+      "jinaai/jina-reranker-v3",
+      "sentence-transformers/all-MiniLM-L6-v2"
+    ]
+  },
+  "related_products": [
+    "curia",
+    "netflow-anomaly",
+    "domain-lexicon",
+    "brand-protection",
+    "text-compression"
+  ],
+  "links": {
+    "github": "https://github.com/Auspex-Aerie/curia",
+    "hf_layout": "https://github.com/Auspex-Aerie/curia/blob/main/docs/hf_hub.md"
+  }
+}
