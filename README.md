@@ -19,10 +19,12 @@ Needs Python 3.10+, [uv](https://docs.astral.sh/uv/), Node.js/npm, [OpenRouter](
 
 ```bash
 uv sync
-cd frontend && npm install && cd ..
+cd frontend && npm install && cd ..   # Vite + UI deps live only here (not via uv, not repo root)
 cp .env.example .env   # OPENROUTER_API_KEY=...
 ./start.sh
 ```
+
+`uv` installs Python only. Observatory packages (`vite`, `marked`, `dompurify`, `highlight.js`, …) come from **`frontend/package.json`** — always run `npm install` inside `frontend/`. Do not `npm install vite` at the repo root (there is no root package). Avoid `NODE_ENV=production` / `npm install --omit=dev` for local setup; the app needs the full frontend install to run `npm run dev`.
 
 - Observatory: [http://localhost:5173](http://localhost:5173)  
 - API: `http://127.0.0.1:8001` (`CURIA_API_HOST` / `CURIA_API_PORT` / `CURIA_WEB_HOST` override)
