@@ -333,9 +333,10 @@ incidents* — not tasks (those live in `PLAN.md` / issue trackers).
 - **revisit_when:** retrieval recall gaps persist after catalog limits + structure-aware compression.
 
 ### DEF-008: Defer full UI model catalog editor
-- **date:** 2026-07-10 · **status:** active · **triggered_by:** `DEC-018` · **docs_updated:** `docs/decision_log.md` · **related:** `DEC-018`, `PIV-001`
+- **date:** 2026-07-10 · **status:** resolved · **resolved_by:** `DEC-035` · **triggered_by:** `DEC-018` · **docs_updated:** `docs/decision_log.md` · **related:** `DEC-018`, `PIV-001`, `DEC-034`, `DEC-035`
 - **decision:** Defer GUI catalog CRUD. Interim: hand-edit `model_catalog.yaml` + CLI/MCP `arena catalog` commands; settings panel continues squad/chair/repo only until Phase C.
 - **revisit_when:** non-developer users need to accept observation deltas or edit modifiers without YAML.
+- **resolution:** Settings **Catalog** tab is the writable operator surface for `model_catalog.yaml` (list/edit tags·modifier·override, OpenRouter refresh, validate, accept/decline observations) via existing `/api/catalog/*`. FREEZE restart remains manual (DEF-014).
 
 ### DEF-009: Defer ContentChecker as Strata OSS library (tokenjam structure preserve)
 - **date:** 2026-07-10 · **status:** active · **triggered_by:** `DEC-018`; tokenjam `core/summarize/wrap.py` + `detect.py` reuse · **docs_updated:** `docs/decision_log.md` · **related:** `DEC-018`
@@ -510,3 +511,9 @@ incidents* — not tasks (those live in `PLAN.md` / issue trackers).
 - **date:** 2026-07-29 · **status:** active · **triggered_by:** `DEC-034` · **docs_updated:** `docs/decision_log.md` · **related:** `DEC-034`, `DEC-018`
 - **decision:** Defer writing `OPENROUTER_API_KEY` (or other secrets) from the UI, and defer any “Save & restart backend” process control. Status API reserves secret write fields; operators set `.env` and restart manually.
 - **revisit_when:** single-user local installer or first non-developer onboarding path needs key entry without editing files.
+
+### DEC-035: Settings Catalog tab is the writable FREEZE catalog surface
+- **date:** 2026-07-29 · **status:** accepted · **triggered_by:** `DEC-034` PR1 merged; DEF-008 revisit · **docs_updated:** `docs/decision_log.md`, `frontend/src/deck/settings-page.ts` · **related:** `DEC-034`, `DEC-018`, `DEF-008`, `DEF-014` · **resolves:** `DEF-008`
+- **decision:** Add a Settings **Catalog** tab that is the first-class **writable operator surface** for `model_catalog.yaml`: list models, edit tags / model_modifier / manual_override_limit, OpenRouter refresh, schema validate, accept/decline pending limit observations. All writes go through existing `/api/catalog/*` routes (no parallel editor). After any write, UI shows a session-scoped **Restart required** chip; process restart stays manual (DEF-014). Hot settings (squad/policy/repo/theme) remain on other tabs and apply without restart.
+- **rationale:** Catalog APIs already implemented DEF-008’s backend path; operators still had to YAML-edit or use MCP. Closing the gap in Settings keeps one control plane for humans while agents keep HTTP/MCP.
+- **impact:** Non-developers can manage catalog limits and observation deltas without YAML; FREEZE semantics unchanged.

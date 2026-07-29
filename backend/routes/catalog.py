@@ -76,10 +76,11 @@ async def list_pending_observations(
     if squad:
         preset = load_squad_preset(squad)
         model_ids = list(preset["arena_models"])
-    pending = service.pending_for_models(model_ids)
+    # observation_pending_dicts includes exceeds_threshold for Settings UI (DEC-035).
+    pending = service.observation_pending_dicts(model_ids)
     threshold = service.resolver.arena.catalog.observation_delta_threshold
     return {
-        "pending": [p.to_dict() for p in pending],
+        "pending": pending,
         "count": len(pending),
         "delta_threshold": threshold,
     }

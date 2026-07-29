@@ -1,4 +1,4 @@
-/** Full-page Settings workspace (DEC-034 PR1). */
+/** Full-page Settings workspace (DEC-034 + DEF-008 catalog panel). */
 
 import { api, type RuntimeSettings } from './api';
 import { escapeHtml } from './escape';
@@ -13,9 +13,32 @@ import type { SettingsTab, SetupCheck, SetupStatus } from './types';
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'setup', label: 'Setup' },
   { id: 'squad', label: 'Squad' },
+  { id: 'catalog', label: 'Catalog' },
   { id: 'repository', label: 'Repository' },
   { id: 'appearance', label: 'Appearance' },
 ];
+
+const RESTART_FLAG_KEY = 'curia.catalogRestartRequired';
+
+type CatalogEntry = {
+  tags?: string[];
+  model_modifier?: number;
+  manual_override_limit?: number | null;
+  registered_limit?: number | null;
+  observed_limit?: number | null;
+  [key: string]: unknown;
+};
+
+type PendingObservation = {
+  id: number | string;
+  model_id: string;
+  registered_limit?: number;
+  observed_limit?: number;
+  delta_ratio?: number;
+  prompt_tokens?: number;
+  failure_reason?: string | null;
+  exceeds_threshold?: boolean;
+};
 
 interface SettingsDraft {
   theme: 'light' | 'dark';
@@ -29,6 +52,16 @@ interface SettingsDraft {
 
 let draft: SettingsDraft | null = null;
 let catalogModelIds: string[] = [];
+let catalogEntries: Record<string, CatalogEntry> = {};
+let catalogMeta: Record<string, unknown> | null = null;
+let pendingObservations: PendingObservation[] = [];
+let catalogLoaded = false;
+let catalogLoadInFlight: Promise<void> | null = null;
+let catalogTableFilter = '';
+let catalogMessage = '';
+let catalogError = '';
+let catalogBusy = false;
+let restartRequired = loadRestartRequired();
 let statusCache: SetupStatus | null = null;
 /** True after first successful settings hydrate (draft + status attempt). */
 let settingsHydrated = false;
@@ -39,6 +72,54 @@ let saveMessage = '';
 let saveError = '';
 let busy = false;
 let modelFilter = '';
+
+function loadRestartRequired(): boolean {
+  try {
+    return sessionStorage.getItem(RESTART_FLAG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markRestartRequired(required = true): void {
+  restartRequired = required;
+  try {
+    if (required) sessionStorage.setItem(RESTART_FLAG_KEY, '1');
+    else sessionStorage.removeItem(RESTART_FLAG_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function loadCatalogPanel(force = false): Promise<void> {
+  if (catalogLoadInFlight) {
+    await catalogLoadInFlight;
+    if (!force) return;
+  }
+  if (catalogLoaded && !force) return;
+
+  catalogLoadInFlight = (async () => {
+    try {
+      const [modelsPayload, metaPayload, pendingPayload] = await Promise.all([
+        api.catalogModels(),
+        api.catalogMeta().catch(() => ({})),
+        api.catalogPendingObservations().catch(() => ({ pending: [] })),
+      ]);
+      const models = (modelsPayload.models || {}) as Record<string, CatalogEntry>;
+      catalogEntries = models;
+      catalogModelIds = Object.keys(models).sort();
+      catalogMeta = metaPayload as Record<string, unknown>;
+      pendingObservations = (pendingPayload.pending || []) as PendingObservation[];
+      catalogLoaded = true;
+      catalogError = '';
+    } catch (err) {
+      catalogError = err instanceof Error ? err.message : 'Unable to load catalog';
+    } finally {
+      catalogLoadInFlight = null;
+    }
+  })();
+  await catalogLoadInFlight;
+}
 
 function emptyDraft(): SettingsDraft {
   return {
@@ -118,15 +199,7 @@ export async function ensureSettingsLoaded(options: { forceStatus?: boolean } = 
         draft = emptyDraft();
       }
     }
-    if (!catalogModelIds.length) {
-      try {
-        const catalog = await api.catalogModels();
-        const models = (catalog.models || {}) as Record<string, unknown>;
-        catalogModelIds = Object.keys(models).sort();
-      } catch {
-        catalogModelIds = [];
-      }
-    }
+    await loadCatalogPanel(false);
     await refreshSetupStatus(Boolean(options.forceStatus));
     settingsHydrated = true;
   })();
@@ -330,6 +403,310 @@ function renderAppearance(): string {
   `;
 }
 
+function formatLimit(value: unknown): string {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString() : String(value);
+}
+
+function observationRow(obs: PendingObservation): string {
+  const delta =
+    obs.delta_ratio != null ? `${(Number(obs.delta_ratio) * 100).toFixed(1)}%` : '—';
+  return `<li class="settings-obs-row">
+    <div>
+      <strong><code>${escapeHtml(String(obs.model_id))}</code></strong>
+      <p class="meta">registered ${formatLimit(obs.registered_limit)} → observed ${formatLimit(obs.observed_limit)} · Δ ${escapeHtml(delta)}${obs.exceeds_threshold ? ' · above threshold' : ''}</p>
+    </div>
+    <div class="settings-obs-actions">
+      <button type="button" class="rail-btn primary" data-obs-accept="${escapeHtml(String(obs.id))}" ${catalogBusy ? 'disabled' : ''}>Accept</button>
+      <button type="button" class="rail-btn" data-obs-decline="${escapeHtml(String(obs.id))}" ${catalogBusy ? 'disabled' : ''}>Decline</button>
+    </div>
+  </li>`;
+}
+
+function catalogModelRow(modelId: string, entry: CatalogEntry): string {
+  const tags = (entry.tags || []).join(', ');
+  const modifier = entry.model_modifier != null ? String(entry.model_modifier) : '1';
+  const override =
+    entry.manual_override_limit != null && entry.manual_override_limit !== undefined
+      ? String(entry.manual_override_limit)
+      : '';
+  return `<tr data-catalog-row="${escapeHtml(modelId)}">
+    <td class="catalog-id"><code title="${escapeHtml(modelId)}">${escapeHtml(modelId)}</code></td>
+    <td class="catalog-num">${escapeHtml(formatLimit(entry.registered_limit))}</td>
+    <td class="catalog-num">${escapeHtml(formatLimit(entry.observed_limit))}</td>
+    <td><input type="text" data-catalog-tags value="${escapeHtml(tags)}" placeholder="free, …" spellcheck="false"></td>
+    <td><input type="number" data-catalog-modifier step="0.05" min="0" max="2" value="${escapeHtml(modifier)}"></td>
+    <td><input type="number" data-catalog-override step="1" min="0" value="${escapeHtml(override)}" placeholder="none"></td>
+    <td><button type="button" class="rail-btn primary" data-catalog-save="${escapeHtml(modelId)}" ${catalogBusy ? 'disabled' : ''}>Save</button></td>
+  </tr>`;
+}
+
+function renderCatalog(): string {
+  const filter = catalogTableFilter.trim().toLowerCase();
+  const ids = catalogModelIds.filter((id) => !filter || id.toLowerCase().includes(filter));
+  const lastRefresh = catalogMeta?.last_refresh_at
+    ? String(catalogMeta.last_refresh_at)
+    : 'never';
+  const path = catalogMeta?.catalog_path ? String(catalogMeta.catalog_path) : 'data/model_catalog.yaml';
+
+  return `
+    ${
+      restartRequired
+        ? `<div class="settings-restart-banner" role="status">
+            <div>
+              <strong>Restart required</strong>
+              <p class="meta">Catalog / FREEZE YAML changes are on disk but this API process still uses the previous freeze snapshot. Restart the backend to apply.</p>
+            </div>
+            <button type="button" class="rail-btn" data-clear-restart>Dismiss</button>
+          </div>`
+        : ''
+    }
+    <div class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2>Model catalog ${badge('restart')}</h2>
+          <p class="meta">Writable surface for <code>${escapeHtml(path)}</code>. Edits clear the freeze cache; live turns need a process restart.</p>
+        </div>
+      </div>
+      <p class="meta">Last OpenRouter refresh: ${escapeHtml(lastRefresh)}</p>
+      <div class="settings-actions">
+        <button type="button" class="rail-btn primary" data-catalog-refresh ${catalogBusy ? 'disabled' : ''}>Refresh from OpenRouter</button>
+        <button type="button" class="rail-btn" data-catalog-validate ${catalogBusy ? 'disabled' : ''}>Validate YAML</button>
+        <button type="button" class="rail-btn" data-catalog-reload ${catalogBusy ? 'disabled' : ''}>Reload</button>
+        ${catalogMessage ? `<span class="settings-save-ok">${escapeHtml(catalogMessage)}</span>` : ''}
+        ${catalogError ? `<span class="settings-save-err">${escapeHtml(catalogError)}</span>` : ''}
+      </div>
+    </div>
+    <div class="settings-card">
+      <h2>Pending limit observations</h2>
+      <p class="meta">Accept promotes an observed limit into the catalog (restart still required for live turns).</p>
+      ${
+        pendingObservations.length
+          ? `<ul class="settings-obs-list">${pendingObservations.map(observationRow).join('')}</ul>`
+          : '<p class="meta">No pending observations.</p>'
+      }
+    </div>
+    <div class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2>Models in use</h2>
+          <p class="meta">${catalogModelIds.length} registered · tags, modifier, and manual override are editable</p>
+        </div>
+      </div>
+      <label class="settings-field">
+        <span>Filter</span>
+        <input type="search" data-catalog-filter placeholder="Filter by model id…" value="${escapeHtml(catalogTableFilter)}">
+      </label>
+      <div class="catalog-table-scroll">
+        <table class="catalog-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Registered</th>
+              <th>Observed</th>
+              <th>Tags</th>
+              <th>Modifier</th>
+              <th>Manual override</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              ids.length
+                ? ids.map((id) => catalogModelRow(id, catalogEntries[id] || {})).join('')
+                : `<tr><td colspan="7" class="meta">${catalogLoaded ? 'No models match this filter.' : 'Loading catalog…'}</td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function rowPayload(row: HTMLElement): {
+  tags: string[];
+  model_modifier: number;
+  manual_override_limit?: number | null;
+  clear_manual_override?: boolean;
+} {
+  const tagsRaw = (row.querySelector('[data-catalog-tags]') as HTMLInputElement | null)?.value || '';
+  const tags = tagsRaw
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const modifierRaw = (row.querySelector('[data-catalog-modifier]') as HTMLInputElement | null)
+    ?.value;
+  const overrideRaw = (row.querySelector('[data-catalog-override]') as HTMLInputElement | null)
+    ?.value;
+  const model_modifier = Number(modifierRaw);
+  const payload: {
+    tags: string[];
+    model_modifier: number;
+    manual_override_limit?: number | null;
+    clear_manual_override?: boolean;
+  } = {
+    tags,
+    model_modifier: Number.isFinite(model_modifier) ? model_modifier : 1,
+  };
+  if (overrideRaw == null || String(overrideRaw).trim() === '') {
+    payload.clear_manual_override = true;
+  } else {
+    const n = Number(overrideRaw);
+    if (Number.isFinite(n)) payload.manual_override_limit = Math.trunc(n);
+  }
+  return payload;
+}
+
+async function saveCatalogRow(container: HTMLElement, modelId: string): Promise<void> {
+  const row = container.querySelector(
+    `[data-catalog-row="${CSS.escape(modelId)}"]`,
+  ) as HTMLElement | null;
+  // Capture edited inputs *before* re-render destroys the form (Greptile P1).
+  if (!row || catalogBusy) return;
+  const payload = rowPayload(row);
+  catalogBusy = true;
+  catalogMessage = '';
+  catalogError = '';
+  renderSettingsPage(container);
+  try {
+    const result = await api.catalogUpdateModel(modelId, payload);
+    if (result.requires_restart !== false) markRestartRequired(true);
+    if (result.entry && typeof result.entry === 'object') {
+      catalogEntries[modelId] = result.entry as CatalogEntry;
+    }
+    catalogMessage = `Saved ${modelId} — restart API to apply freeze.`;
+    await refreshSetupStatus(true);
+  } catch (err) {
+    catalogError = err instanceof Error ? err.message : 'Catalog save failed';
+  } finally {
+    catalogBusy = false;
+    renderSettingsPage(container);
+  }
+}
+
+async function runCatalogRefresh(container: HTMLElement): Promise<void> {
+  if (catalogBusy) return;
+  catalogBusy = true;
+  catalogMessage = '';
+  catalogError = '';
+  renderSettingsPage(container);
+  try {
+    const result = await api.catalogRefresh(true);
+    markRestartRequired(true);
+    await loadCatalogPanel(true);
+    const updated = result.updated_count != null ? String(result.updated_count) : 'ok';
+    catalogMessage = `OpenRouter refresh complete (${updated} updates). Restart API to apply.`;
+    await refreshSetupStatus(true);
+  } catch (err) {
+    catalogError = err instanceof Error ? err.message : 'Refresh failed';
+  } finally {
+    catalogBusy = false;
+    renderSettingsPage(container);
+  }
+}
+
+async function runCatalogValidate(container: HTMLElement): Promise<void> {
+  if (catalogBusy) return;
+  catalogBusy = true;
+  catalogMessage = '';
+  catalogError = '';
+  renderSettingsPage(container);
+  try {
+    const result = await api.catalogValidate();
+    if (result.ok) catalogMessage = 'arena_config.yaml and model_catalog.yaml validate.';
+    else {
+      const issues = Array.isArray(result.issues) ? result.issues.map(String) : [];
+      catalogError = issues.slice(0, 3).join('; ') || 'Validation failed';
+    }
+  } catch (err) {
+    catalogError = err instanceof Error ? err.message : 'Validate failed';
+  } finally {
+    catalogBusy = false;
+    renderSettingsPage(container);
+  }
+}
+
+async function runObservationAction(
+  container: HTMLElement,
+  id: string,
+  action: 'accept' | 'decline',
+): Promise<void> {
+  if (catalogBusy) return;
+  catalogBusy = true;
+  catalogMessage = '';
+  catalogError = '';
+  renderSettingsPage(container);
+  try {
+    if (action === 'accept') {
+      await api.catalogAcceptObservation(id);
+      markRestartRequired(true);
+      catalogMessage = `Accepted observation ${id} — restart API to apply.`;
+    } else {
+      await api.catalogDeclineObservation(id);
+      catalogMessage = `Declined observation ${id}.`;
+    }
+    await loadCatalogPanel(true);
+    await refreshSetupStatus(true);
+  } catch (err) {
+    catalogError = err instanceof Error ? err.message : 'Observation action failed';
+  } finally {
+    catalogBusy = false;
+    renderSettingsPage(container);
+  }
+}
+
+function bindCatalogHandlers(container: HTMLElement): void {
+  container.querySelectorAll('[data-catalog-save]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = (btn as HTMLElement).dataset.catalogSave;
+      if (id) void saveCatalogRow(container, id);
+    });
+  });
+  container
+    .querySelector('[data-catalog-refresh]')
+    ?.addEventListener('click', () => void runCatalogRefresh(container));
+  container
+    .querySelector('[data-catalog-validate]')
+    ?.addEventListener('click', () => void runCatalogValidate(container));
+  container.querySelector('[data-catalog-reload]')?.addEventListener('click', () => {
+    void (async () => {
+      catalogBusy = true;
+      renderSettingsPage(container);
+      await loadCatalogPanel(true);
+      catalogBusy = false;
+      catalogMessage = 'Catalog reloaded.';
+      renderSettingsPage(container);
+    })();
+  });
+  container.querySelector('[data-clear-restart]')?.addEventListener('click', () => {
+    markRestartRequired(false);
+    renderSettingsPage(container);
+  });
+  container.querySelectorAll('[data-obs-accept]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = (btn as HTMLElement).dataset.obsAccept;
+      if (id) void runObservationAction(container, id, 'accept');
+    });
+  });
+  container.querySelectorAll('[data-obs-decline]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = (btn as HTMLElement).dataset.obsDecline;
+      if (id) void runObservationAction(container, id, 'decline');
+    });
+  });
+  const filter = container.querySelector<HTMLInputElement>('[data-catalog-filter]');
+  filter?.addEventListener('input', () => {
+    catalogTableFilter = filter.value;
+    renderSettingsPage(container);
+    const again = container.querySelector<HTMLInputElement>('[data-catalog-filter]');
+    if (again) {
+      again.focus();
+      again.setSelectionRange(catalogTableFilter.length, catalogTableFilter.length);
+    }
+  });
+}
+
 function bindDraftFields(container: HTMLElement): void {
   if (!draft) return;
   container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-field]').forEach((el) => {
@@ -453,14 +830,23 @@ export function renderSettingsPage(container: HTMLElement): void {
   const state = getState();
   const tab = state.settingsTab;
   const status = statusCache || state.setupStatus;
+  if (tab === 'catalog' && !catalogLoaded && !catalogLoadInFlight) {
+    void loadCatalogPanel(false).then(() => {
+      if (getState().workspaceView === 'settings' && getState().settingsTab === 'catalog') {
+        renderSettingsPage(container);
+      }
+    });
+  }
   const body =
     tab === 'setup'
       ? renderSetup(status)
       : tab === 'squad'
         ? renderSquad(status)
-        : tab === 'repository'
-          ? renderRepository()
-          : renderAppearance();
+        : tab === 'catalog'
+          ? renderCatalog()
+          : tab === 'repository'
+            ? renderRepository()
+            : renderAppearance();
 
   container.innerHTML = `
     <section class="settings-page-shell">
@@ -468,7 +854,7 @@ export function renderSettingsPage(container: HTMLElement): void {
         <div>
           <p class="session-eyebrow">Operator controls</p>
           <h1>Settings</h1>
-          <p class="meta">Hot fields apply on the next turn. FREEZE catalog edits (coming next) need a process restart.</p>
+          <p class="meta">Hot fields apply on the next turn. Catalog (FREEZE) writes need an API restart.${restartRequired ? ' <strong class="tone-warn">Restart pending.</strong>' : ''}</p>
         </div>
         <div class="settings-summary">
           <strong>${status ? `${status.score.ready}/${status.score.total}` : '—'}</strong>
@@ -478,11 +864,11 @@ export function renderSettingsPage(container: HTMLElement): void {
       <nav class="settings-tabs" aria-label="Settings sections">
         ${TABS.map(
           (t) =>
-            `<button type="button" class="settings-tab ${tab === t.id ? 'on' : ''}" data-settings-tab="${t.id}">${t.label}</button>`,
+            `<button type="button" class="settings-tab ${tab === t.id ? 'on' : ''}" data-settings-tab="${t.id}">${t.label}${t.id === 'catalog' && pendingObservations.length ? ` · ${pendingObservations.length}` : ''}</button>`,
         ).join('')}
       </nav>
       ${state.setupStatusError ? `<div class="session-error">${escapeHtml(state.setupStatusError)}</div>` : ''}
-      <div class="settings-body">${body}</div>
+      <div class="settings-body settings-body-${tab}">${body}</div>
     </section>
   `;
 
@@ -490,6 +876,8 @@ export function renderSettingsPage(container: HTMLElement): void {
     btn.addEventListener('click', () => {
       saveMessage = '';
       saveError = '';
+      catalogMessage = '';
+      catalogError = '';
       setSettingsTab((btn as HTMLElement).dataset.settingsTab as SettingsTab);
     });
   });
@@ -499,7 +887,7 @@ export function renderSettingsPage(container: HTMLElement): void {
       if (fix === 'secrets' || fix === 'setup') setSettingsTab('setup');
       else if (fix === 'squad') setSettingsTab('squad');
       else if (fix === 'repository') setSettingsTab('repository');
-      else if (fix === 'catalog') setSettingsTab('squad');
+      else if (fix === 'catalog') setSettingsTab('catalog');
       else if (fix === 'appearance') setSettingsTab('appearance');
     });
   });
@@ -518,6 +906,7 @@ export function renderSettingsPage(container: HTMLElement): void {
     });
   });
   bindDraftFields(container);
+  if (tab === 'catalog') bindCatalogHandlers(container);
   container.querySelector('[data-save-squad]')?.addEventListener('click', () => void saveSquad(container));
   container.querySelector('[data-save-repo]')?.addEventListener('click', () => void saveRepo(container));
   container.querySelector('[data-save-theme]')?.addEventListener('click', () => void saveTheme(container));

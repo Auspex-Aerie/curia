@@ -9,7 +9,7 @@ export type TurnStatus = 'running' | 'complete' | 'idle' | 'failed';
 
 export type WorkspaceView = 'turns' | 'sessions' | 'settings';
 
-export type SettingsTab = 'setup' | 'squad' | 'repository' | 'appearance';
+export type SettingsTab = 'setup' | 'squad' | 'catalog' | 'repository' | 'appearance';
 
 export interface SetupCheck {
   id: string;
