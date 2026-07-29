@@ -1,20 +1,47 @@
 #!/usr/bin/env python3
-"""Publish Curia first-party Hub artifacts under Auspex-Aerie.
+"""Publish Curia first-party Hub artifacts under the auspex-aerie HF user.
 
 Requires HF_TOKEN (write). Does not commit tokens. Re-run is idempotent
-(create_repo exist_ok + upload_folder).
+(create_repo exist_ok + upload_folder). Syncs router labels from the canonical
+in-repo path before upload so the Hub mirror cannot drift silently.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HF_DIR = ROOT / "hf"
-ORG = "auspex-aerie"
+# HF account for this lab is the *user* `auspex-aerie` (GitHub org is Auspex-Aerie).
+ORG = os.environ.get("HF_NAMESPACE", "auspex-aerie")
+CANONICAL_LABELS = ROOT / "backend" / "rag" / "router_training.json"
+MIRROR_LABELS = HF_DIR / "curia-router-labels" / "data" / "router_training.json"
+
+
+def _is_already_present(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(
+        needle in text
+        for needle in (
+            "already",
+            "exists",
+            "duplicate",
+            "409",
+            "conflict",
+        )
+    )
+
+
+def _sync_router_labels() -> None:
+    if not CANONICAL_LABELS.is_file():
+        raise FileNotFoundError(f"canonical labels missing: {CANONICAL_LABELS}")
+    MIRROR_LABELS.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(CANONICAL_LABELS, MIRROR_LABELS)
+    print(f"Synced router labels → {MIRROR_LABELS.relative_to(ROOT)}")
 
 
 def main() -> int:
@@ -30,7 +57,18 @@ def main() -> int:
         print("ERROR: pass --token or set HF_TOKEN", file=sys.stderr)
         return 2
 
-    from huggingface_hub import HfApi
+    try:
+        from huggingface_hub import HfApi
+        from huggingface_hub.errors import HfHubHTTPError
+    except ImportError:
+        print(
+            "ERROR: huggingface_hub is required "
+            "(declared in pyproject.toml; run `uv sync`)",
+            file=sys.stderr,
+        )
+        return 2
+
+    _sync_router_labels()
 
     api = HfApi(token=args.token)
     who = api.whoami()
@@ -62,7 +100,9 @@ def main() -> int:
 
     if not args.skip_collections:
         print("Ensuring product collections …")
-        # Collection titles for the multi-product shelf
+        # Empty collections still exist; they appear under the user's Collections
+        # tab (https://huggingface.co/auspex-aerie/collections), not always on
+        # the profile "Models" landing strip.
         collections_spec = [
             ("curia", "Curia — multi-model deliberation & code grounding"),
             ("netflow-anomaly", "Netflow anomaly detection (planned artifacts)"),
@@ -70,11 +110,11 @@ def main() -> int:
             ("brand-protection", "Brand spoof / lookalike protection (planned)"),
             ("text-compression", "Neural text compression (planned)"),
         ]
-        slug_to_id: dict[str, str] = {}
+        slug_by_key: dict[str, str] = {}
         existing = list(api.list_collections(owner=ORG))
         by_title = {c.title: c for c in existing}
 
-        for slug, title in collections_spec:
+        for key, title in collections_spec:
             if title in by_title:
                 col = by_title[title]
                 print(f"  collection exists: {col.slug}")
@@ -85,24 +125,41 @@ def main() -> int:
                     description=title,
                 )
                 print(f"  created collection: {col.slug}")
-            slug_to_id[slug] = col.slug
+            slug_by_key[key] = col.slug
 
-        curia_slug = slug_to_id.get("curia")
-        if curia_slug:
-            for item_id, item_type, note in (
-                (ds_id, "dataset", "Router intent labels"),
-                (model_id, "model", "Grounding stack recipe"),
-            ):
-                try:
-                    api.add_collection_item(
-                        curia_slug,
-                        item_id=item_id,
-                        item_type=item_type,
-                        note=note,
-                    )
-                    print(f"  added {item_type} {item_id} → curia collection")
-                except Exception as exc:
-                    print(f"  add_collection_item {item_id}: {exc}")
+        curia_slug = slug_by_key.get("curia")
+        if not curia_slug:
+            print("ERROR: Curia collection slug missing after create/list", file=sys.stderr)
+            return 1
+        for item_id, item_type, note in (
+            (ds_id, "dataset", "Router intent labels"),
+            (model_id, "model", "Grounding stack recipe"),
+        ):
+            try:
+                api.add_collection_item(
+                    curia_slug,
+                    item_id=item_id,
+                    item_type=item_type,
+                    note=note,
+                )
+                print(f"  added {item_type} {item_id} → curia collection")
+            except HfHubHTTPError as exc:
+                if _is_already_present(exc):
+                    print(f"  already in collection: {item_id}")
+                    continue
+                print(f"ERROR: add_collection_item {item_id}: {exc}", file=sys.stderr)
+                return 1
+            except Exception as exc:
+                if _is_already_present(exc):
+                    print(f"  already in collection: {item_id}")
+                    continue
+                print(f"ERROR: add_collection_item {item_id}: {exc}", file=sys.stderr)
+                return 1
+
+        print(
+            f"Collections UI: https://huggingface.co/{ORG}/collections "
+            "(empty shelves still list here; they are not hidden, just easy to miss)"
+        )
 
     print("Done.")
     return 0
