@@ -12,10 +12,20 @@ cd "$ROOT_DIR"
 API_PORT="${CURIA_API_PORT:-8001}"
 WEB_PORT="${CURIA_WEB_PORT:-5173}"
 API_HOST="${CURIA_API_HOST:-127.0.0.1}"
-# Bind Vite on all interfaces so Windows browsers can reach WSL-forwarded ports.
-WEB_HOST="${CURIA_WEB_HOST:-0.0.0.0}"
+# Loopback by default (local app). WSL Windows browsers still use
+# http://127.0.0.1:WEB_PORT via localhost forwarding. LAN bind is opt-in:
+#   CURIA_WEB_HOST=0.0.0.0 ./start.sh
+WEB_HOST="${CURIA_WEB_HOST:-127.0.0.1}"
 SKIP_KILL="${CURIA_SKIP_KILL:-0}"
 SKIP_INSTALL="${CURIA_SKIP_INSTALL:-0}"
+
+# Host used by curl readiness + Vite proxy (must reach the API from this process).
+# When uvicorn binds 0.0.0.0/::, loopback still works; otherwise use the bind host.
+if [[ "${API_HOST}" == "0.0.0.0" || "${API_HOST}" == "::" || "${API_HOST}" == "[::]" ]]; then
+  API_REACH="127.0.0.1"
+else
+  API_REACH="${API_HOST}"
+fi
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -107,8 +117,8 @@ reset_env() {
   unset VITE_API_BASE || true
   unset VITE_API_DIRECT || true
   unset VITE_API_PROXY_TARGET || true
-  # Keep intentional operator overrides for bind/ports; re-export proxy target ourselves.
-  export CURIA_API_PROXY_TARGET="http://127.0.0.1:${API_PORT}"
+  # Proxy/readiness must match where *this process* can reach the API.
+  export CURIA_API_PROXY_TARGET="http://${API_REACH}:${API_PORT}"
   # Do not force NODE_ENV=production (would historically omit vite from npm).
   if [[ "${NODE_ENV:-}" == "production" ]]; then
     warn "NODE_ENV=production is set; unsetting for local Observatory install/run"
@@ -184,13 +194,13 @@ fi
 
 ensure_frontend_deps
 
-say "Starting API on ${API_HOST}:${API_PORT}…"
+say "Starting API on ${API_HOST}:${API_PORT} (probe ${API_REACH})…"
 uv run uvicorn backend.main:app --host "${API_HOST}" --port "${API_PORT}" &
 CURIA_PIDS+=("$!")
 
 API_READY=0
 for _ in $(seq 1 60); do
-  if curl -sf "http://127.0.0.1:${API_PORT}/" >/dev/null 2>&1; then
+  if curl -sf "http://${API_REACH}:${API_PORT}/" >/dev/null 2>&1; then
     API_READY=1
     break
   fi
@@ -199,30 +209,38 @@ for _ in $(seq 1 60); do
   fi
   sleep 0.1
 done
-[[ "${API_READY}" -eq 1 ]] || die "API not ready on http://127.0.0.1:${API_PORT}/ within ~6s"
-info "API ready  (curl http://127.0.0.1:${API_PORT}/ → OK)"
+[[ "${API_READY}" -eq 1 ]] || die "API not ready on http://${API_REACH}:${API_PORT}/ within ~6s"
+info "API ready  (curl http://${API_REACH}:${API_PORT}/ → OK)"
 
 say "Starting Observatory (Vite) on ${WEB_HOST}:${WEB_PORT}…"
 info "browser uses relative /api → Vite proxies to ${CURIA_API_PROXY_TARGET}"
+if [[ "${WEB_HOST}" != "127.0.0.1" && "${WEB_HOST}" != "localhost" ]]; then
+  warn "WEB_HOST=${WEB_HOST} is not loopback — local-dev proxy is reachable on that bind (CURIA_WEB_HOST=127.0.0.1 is the default)."
+fi
 (
   cd "${ROOT_DIR}/frontend"
   # Subshell inherits cleaned env; do not reintroduce VITE_API_BASE.
   unset VITE_API_BASE VITE_API_DIRECT
   export CURIA_API_PROXY_TARGET
-  exec npm run dev -- --host "${WEB_HOST}" --port "${WEB_PORT}"
+  # strictPort: fail if WEB_PORT is taken so the banner never lies about the URL.
+  exec npm run dev -- --host "${WEB_HOST}" --port "${WEB_PORT}" --strictPort
 ) &
 CURIA_PIDS+=("$!")
 
-# Brief wait so Vite can bind (non-fatal if slow).
+# Brief wait so Vite can bind; fail if port in use (strictPort) or process dies.
+WEB_READY=0
 for _ in $(seq 1 40); do
-  if curl -sf "http://127.0.0.1:${WEB_PORT}/" >/dev/null 2>&1; then
+  if curl -sf "http://127.0.0.1:${WEB_PORT}/" >/dev/null 2>&1 \
+    || curl -sf "http://${WEB_HOST}:${WEB_PORT}/" >/dev/null 2>&1; then
+    WEB_READY=1
     break
   fi
   if ! kill -0 "${CURIA_PIDS[1]}" 2>/dev/null; then
-    die "Observatory process exited early (see Vite output above)"
+    die "Observatory exited early — is :${WEB_PORT} free? (Vite strictPort; re-run without CURIA_SKIP_KILL or free the port)"
   fi
   sleep 0.15
 done
+[[ "${WEB_READY}" -eq 1 ]] || die "Observatory not accepting on :${WEB_PORT} within a few seconds"
 
 say ""
 say "────────────────────────────────────────────────────────────"
@@ -230,14 +248,14 @@ say "  Open Observatory:"
 say "    http://127.0.0.1:${WEB_PORT}/"
 say "    http://127.0.0.1:${WEB_PORT}/?page=settings"
 say ""
-say "  API (for curl / MCP only — browser should NOT call this host for /api):"
-say "    http://127.0.0.1:${API_PORT}/"
+say "  API (curl / MCP — browser /api stays on :${WEB_PORT} via Vite proxy):"
+say "    http://${API_REACH}:${API_PORT}/"
 say ""
 if is_wsl; then
   say "  WSL tips:"
-  say "    • Use a browser on Windows against http://127.0.0.1:${WEB_PORT}"
-  say "    • DevTools → Network: /api/* must be host :${WEB_PORT}, not :${API_PORT}"
-  say "    • If /api is :${API_PORT}, hard-refresh or you still have VITE_API_DIRECT set"
+  say "    • Windows browser: http://127.0.0.1:${WEB_PORT} (localhost forward)"
+  say "    • Network tab: /api/* on :${WEB_PORT}, not :${API_PORT}"
+  say "    • LAN bind only if needed: CURIA_WEB_HOST=0.0.0.0 ./start.sh"
 fi
 say "  Ctrl+C stops both processes."
 say "────────────────────────────────────────────────────────────"

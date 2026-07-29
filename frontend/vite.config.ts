@@ -104,14 +104,16 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
-    // Listen on all interfaces so Windows browsers can hit WSL-forwarded :5173.
-    host: true,
-    strictPort: false,
+    // Default loopback; start.sh passes --host. Use CURIA_WEB_HOST=0.0.0.0 for LAN.
+    host: '127.0.0.1',
+    // Fail if the port is taken so start.sh never advertises the wrong URL.
+    strictPort: true,
     proxy: buildApiProxy(),
   },
   preview: {
     port: 5173,
-    host: true,
+    host: '127.0.0.1',
+    strictPort: true,
     proxy: buildApiProxy(),
   },
 });

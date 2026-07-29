@@ -24,7 +24,7 @@ cp .env.example .env   # OPENROUTER_API_KEY=...
 ./start.sh             # kills stale Curia on :8001/:5173, resets env, starts API + Observatory
 ```
 
-`./start.sh` is the supported local UX: free Curia ports, unset stale `VITE_API_*`, wait for API health, then Vite with a same-origin `/api` proxy (WSL-friendly). Overrides: `CURIA_API_PORT`, `CURIA_WEB_PORT`, `CURIA_API_HOST`, `CURIA_WEB_HOST`, `CURIA_SKIP_KILL=1`, `CURIA_SKIP_INSTALL=1`.
+`./start.sh` is the supported local UX: free Curia ports, unset stale `VITE_API_*`, wait for API health, then Vite with a same-origin `/api` proxy (WSL-friendly). Defaults bind **127.0.0.1** (local app). Overrides: `CURIA_API_PORT`, `CURIA_WEB_PORT`, `CURIA_API_HOST`, `CURIA_WEB_HOST` (e.g. `0.0.0.0` for LAN), `CURIA_SKIP_KILL=1`, `CURIA_SKIP_INSTALL=1`.
 
 `uv` installs Python only. Observatory packages live under **`frontend/`** — never `npm install vite` at the repo root.
 
