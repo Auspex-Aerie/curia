@@ -27,6 +27,19 @@ else
   API_REACH="${API_HOST}"
 fi
 
+# http://host:port — IPv6 literals need brackets (::1 → [::1]).
+http_host() {
+  local h="$1"
+  if [[ "${h}" == \[* ]]; then
+    printf '%s' "${h}"
+  elif [[ "${h}" == *:* ]]; then
+    printf '[%s]' "${h}"
+  else
+    printf '%s' "${h}"
+  fi
+}
+API_REACH_URL="http://$(http_host "${API_REACH}"):${API_PORT}"
+
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
@@ -118,7 +131,7 @@ reset_env() {
   unset VITE_API_DIRECT || true
   unset VITE_API_PROXY_TARGET || true
   # Proxy/readiness must match where *this process* can reach the API.
-  export CURIA_API_PROXY_TARGET="http://${API_REACH}:${API_PORT}"
+  export CURIA_API_PROXY_TARGET="${API_REACH_URL}"
   # Do not force NODE_ENV=production (would historically omit vite from npm).
   if [[ "${NODE_ENV:-}" == "production" ]]; then
     warn "NODE_ENV=production is set; unsetting for local Observatory install/run"
