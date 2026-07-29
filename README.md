@@ -31,6 +31,19 @@ cp .env.example .env   # OPENROUTER_API_KEY=...
 - Observatory: [http://127.0.0.1:5173](http://127.0.0.1:5173) — browser **relative** `/api` → Vite → API  
 - API: `http://127.0.0.1:8001` (curl/MCP; browser should not need this host for settings)
 
+### Windows / WSL
+
+See active deferral **[DEF-015](docs/decision_log.md#def-015-defer-non-root-wsl-install-path-and-tool-path-enforcement)** (non-root install + PATH enforcement still being worked).
+
+- Run install and `./start.sh` **inside Ubuntu/WSL**, not PowerShell. Open the UI from a Windows browser at `http://127.0.0.1:5173`.
+- Prefer a **normal WSL user** and a clone on the Linux filesystem (`~/curia`). Avoid daily-driver **root** (`sudo su`) when you can — root puts tools under `/root/...` and makes home/`/mnt/c` ownership painful.
+- **Current dogfood note:** some WSL setups are still running as **root** while permissions are sorted; that is temporary (DEF-015), not the long-term target.
+- The official **`uv` installer does not always put `uv` on `PATH`** for the shell you use next. After install it often lives at:
+  - normal user: `~/.local/bin/uv` → e.g. `/home/<you>/.local/bin/uv`
+  - root: `/root/.local/bin/uv`  
+  Fix for the session: `export PATH="$HOME/.local/bin:$PATH"` (or `source "$HOME/.local/bin/env"` if the installer created it). Put that line in `~/.bashrc` (for root: `/root/.bashrc`).
+- Use **Linux** Node/npm in WSL (`which node` must not be under `/mnt/c/...`).
+
 **First grounded run:** prefetch retrieval models (HuggingFace Hub, not Git LFS), then index a repo (settings `repo_root` or MCP reindex).
 
 ```bash
