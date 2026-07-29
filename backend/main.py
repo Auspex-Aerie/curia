@@ -25,8 +25,9 @@ LOCAL_ORIGINS = (
     "http://127.0.0.1:5175",
     "http://127.0.0.1:3000",
 )
-# Any localhost / 127.0.0.1 port for local Observatory + API splits.
-LOCAL_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+# Any localhost / 127.0.0.1 / [::1] port for local Observatory + API splits
+# (IPv6 localhost shows up on some Windows/WSL browser stacks).
+LOCAL_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?"
 
 
 def create_app() -> FastAPI:

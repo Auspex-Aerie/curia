@@ -26,8 +26,8 @@ cp .env.example .env   # OPENROUTER_API_KEY=...
 
 `uv` installs Python only. Observatory packages (`vite`, `marked`, `dompurify`, `highlight.js`, …) come from **`frontend/package.json`** — always run `npm install` inside `frontend/`. Do not `npm install vite` at the repo root (there is no root package). Avoid `NODE_ENV=production` / `npm install --omit=dev` for local setup; the app needs the full frontend install to run `npm run dev`.
 
-- Observatory: [http://127.0.0.1:5173](http://127.0.0.1:5173) (dev proxies browser `/api` → backend; good for WSL)  
-- API: `http://127.0.0.1:8001` (`CURIA_API_HOST` / `CURIA_API_PORT` / `CURIA_WEB_HOST` override)
+- Observatory: [http://127.0.0.1:5173](http://127.0.0.1:5173) — browser uses **relative** `/api` (Vite proxies to the API; required for WSL2)  
+- API: `http://127.0.0.1:8001` (`CURIA_API_HOST` / `CURIA_API_PORT` / `CURIA_WEB_HOST` / `CURIA_WEB_PORT` override)
 
 **First grounded run:** prefetch retrieval models (HuggingFace Hub, not Git LFS), then index a repo (settings `repo_root` or MCP reindex).
 
