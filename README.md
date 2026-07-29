@@ -55,11 +55,12 @@ uv run curia-mcp
 ```
 
 ```text
-get_index_manifest → reindex if needed → create_conversation → send_message
-  → check execution_quality, trace, failures, cost
+create_conversation → get_index_manifest → reindex if needed → send_message
+  → if requires_confirmation: get user OK, re-call with confirm=<plan_fingerprint>
+  → else check execution_quality, trace, failures, cost
 ```
 
-`send_message` is mode-agnostic. Always treat `execution_quality.acceptable` as the real success signal. Tool map: [agent control plane](docs/agent-control-plane-architecture.md).
+Indexes are **per conversation**, so create the conversation first. `send_message` is mode-agnostic. Large turns may return `requires_confirmation` + `plan` (no model run yet)—handle that before looking for `execution_quality`. On a completed turn, treat `execution_quality.acceptable` as the real success signal. Tool map: [agent control plane](docs/agent-control-plane-architecture.md).
 
 ---
 
