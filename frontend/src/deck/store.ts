@@ -241,8 +241,9 @@ export function setSettingsTab(tab: SettingsTab) {
   patch({ settingsTab: tab });
 }
 
+/** Background scope: updates banner without re-entering Settings hydrate/render loop. */
 export function setSetupStatus(status: SetupStatus | null, error: string | null = null) {
-  patch({ setupStatus: status, setupStatusError: error });
+  patch({ setupStatus: status, setupStatusError: error }, 'background');
 }
 
 export function dismissOnboardingBanner() {

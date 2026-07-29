@@ -269,6 +269,7 @@ function bindOnboardingBanner(): void {
 }
 
 async function renderSettingsWorkspace(): Promise<void> {
+  // ensureSettingsLoaded is a no-op after first hydrate (Greptile P1: status/render loop).
   await ensureSettingsLoaded();
   if (getState().workspaceView !== 'settings') return;
   renderSettingsPage(els.deck);

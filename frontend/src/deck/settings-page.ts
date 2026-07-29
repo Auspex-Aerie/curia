@@ -30,6 +30,11 @@ interface SettingsDraft {
 let draft: SettingsDraft | null = null;
 let catalogModelIds: string[] = [];
 let statusCache: SetupStatus | null = null;
+/** True after first successful settings hydrate (draft + status attempt). */
+let settingsHydrated = false;
+/** Coalesce concurrent ensureSettingsLoaded / status fetches. */
+let settingsLoadInFlight: Promise<void> | null = null;
+let statusRefreshInFlight: Promise<SetupStatus | null> | null = null;
 let saveMessage = '';
 let saveError = '';
 let busy = false;
@@ -61,41 +66,76 @@ function draftFromSettings(settings: RuntimeSettings): SettingsDraft {
   };
 }
 
-export async function refreshSetupStatus(): Promise<SetupStatus | null> {
-  try {
-    const status = await api.getSetupStatus();
-    statusCache = status;
-    setSetupStatus(status);
-    return status;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unable to load setup status';
-    setSetupStatus(null, message);
-    return null;
+/**
+ * Fetch setup status once (or when force=true after saves).
+ * Store updates use background scope so they do not re-enter a full Settings render loop.
+ */
+export async function refreshSetupStatus(force = false): Promise<SetupStatus | null> {
+  if (statusRefreshInFlight) {
+    const pending = await statusRefreshInFlight;
+    if (!force) return pending;
   }
+  if (statusCache && !force) return statusCache;
+
+  statusRefreshInFlight = (async () => {
+    try {
+      const status = await api.getSetupStatus();
+      statusCache = status;
+      setSetupStatus(status);
+      return status;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to load setup status';
+      setSetupStatus(null, message);
+      return null;
+    } finally {
+      statusRefreshInFlight = null;
+    }
+  })();
+  return statusRefreshInFlight;
 }
 
-export async function ensureSettingsLoaded(): Promise<void> {
-  if (!draft) {
-    try {
-      const settings = await api.getSettings();
-      draft = draftFromSettings(settings);
-      if (settings.theme === 'light' || settings.theme === 'dark') {
-        setTheme(settings.theme);
+/**
+ * Load draft/catalog/status once per session open path.
+ * Subsequent Settings renders reuse module state — no network — unless forceStatus.
+ */
+export async function ensureSettingsLoaded(options: { forceStatus?: boolean } = {}): Promise<void> {
+  if (settingsLoadInFlight) {
+    await settingsLoadInFlight;
+    if (options.forceStatus) await refreshSetupStatus(true);
+    return;
+  }
+  if (settingsHydrated && !options.forceStatus) return;
+
+  settingsLoadInFlight = (async () => {
+    if (!draft) {
+      try {
+        const settings = await api.getSettings();
+        draft = draftFromSettings(settings);
+        if (settings.theme === 'light' || settings.theme === 'dark') {
+          setTheme(settings.theme);
+        }
+      } catch {
+        draft = emptyDraft();
       }
-    } catch {
-      draft = emptyDraft();
     }
-  }
-  if (!catalogModelIds.length) {
-    try {
-      const catalog = await api.catalogModels();
-      const models = (catalog.models || {}) as Record<string, unknown>;
-      catalogModelIds = Object.keys(models).sort();
-    } catch {
-      catalogModelIds = [];
+    if (!catalogModelIds.length) {
+      try {
+        const catalog = await api.catalogModels();
+        const models = (catalog.models || {}) as Record<string, unknown>;
+        catalogModelIds = Object.keys(models).sort();
+      } catch {
+        catalogModelIds = [];
+      }
     }
+    await refreshSetupStatus(Boolean(options.forceStatus));
+    settingsHydrated = true;
+  })();
+
+  try {
+    await settingsLoadInFlight;
+  } finally {
+    settingsLoadInFlight = null;
   }
-  await refreshSetupStatus();
 }
 
 function badge(apply: string): string {
@@ -362,7 +402,7 @@ async function saveSquad(container: HTMLElement): Promise<void> {
     draft.compositionMode =
       settings.arena_squad === 'custom' ? 'custom' : draft.compositionMode;
     saveMessage = 'Squad saved — applies to the next turn.';
-    await refreshSetupStatus();
+    await refreshSetupStatus(true);
   } catch (err) {
     saveError = err instanceof Error ? err.message : 'Save failed';
   } finally {
@@ -381,7 +421,7 @@ async function saveRepo(container: HTMLElement): Promise<void> {
     const settings = await api.updateSettings({ repo_root: draft.repo_root });
     draft = { ...draft, ...draftFromSettings(settings), compositionMode: draft.compositionMode };
     saveMessage = 'Repository root saved.';
-    await refreshSetupStatus();
+    await refreshSetupStatus(true);
   } catch (err) {
     saveError = err instanceof Error ? err.message : 'Save failed';
   } finally {
