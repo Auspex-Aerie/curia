@@ -275,14 +275,24 @@ fi
 
 ensure_frontend_deps
 
+# Surface import/env failures *before* backgrounding (hidden logs made WSL look "stuck").
+say "Preflight: uv sync (project env)…"
+if ! uv sync; then
+  die "uv sync failed — fix Python deps before start (see output above)"
+fi
+say "Preflight: import backend.main (first import can take a minute on WSL)…"
+if ! uv run python -c "import backend.main; print('backend.main OK')"; then
+  die "backend.main import failed — see traceback above (not a port/proxy issue)"
+fi
+info "preflight OK"
+
 say "Starting API on ${API_HOST}:${API_PORT} (probe ${API_REACH_URL}, up to ${API_READY_SECS}s)…"
-info "API log: ${API_LOG}"
-# New process group so we can signal the whole uv→uvicorn tree if needed.
-set +m
+info "API log: ${API_LOG}  (latest lines also print while waiting)"
+: >"${API_LOG}"
 (
   cd "${ROOT_DIR}"
   exec uv run uvicorn backend.main:app --host "${API_HOST}" --port "${API_PORT}"
-) >"${API_LOG}" 2>&1 &
+) >>"${API_LOG}" 2>&1 &
 CURIA_PIDS+=("$!")
 
 API_READY=0
@@ -294,18 +304,22 @@ while [[ "${elapsed}" -lt "${API_READY_SECS}" ]]; do
   fi
   if ! kill -0 "${CURIA_PIDS[0]}" 2>/dev/null; then
     dump_log_tail "${API_LOG}" "API"
-    die "API process exited before becoming ready. Common fixes: uv sync (from repo root), OPENROUTER not required for boot, check log above."
+    die "API process exited before becoming ready. See log tail above."
   fi
-  # Heartbeat every ~5s so long cold starts do not look hung.
   if (( elapsed > 0 && elapsed % 5 == 0 )); then
     info "still waiting for API… ${elapsed}s / ${API_READY_SECS}s"
+    if [[ -s "${API_LOG}" ]]; then
+      tail -n 8 "${API_LOG}" | sed 's/^/    | /' || true
+    else
+      info "(API log empty — process alive but silent)"
+    fi
   fi
   sleep 1
   elapsed=$((elapsed + 1))
 done
 if [[ "${API_READY}" -ne 1 ]]; then
   dump_log_tail "${API_LOG}" "API"
-  die "API not ready on ${API_REACH_URL}/ within ${API_READY_SECS}s (raise CURIA_API_READY_SECS if cold start is slow)."
+  die "API not ready on ${API_REACH_URL}/ within ${API_READY_SECS}s. Run: cat ${API_LOG}"
 fi
 info "API ready  (curl ${API_REACH_URL}/ → OK)"
 
@@ -383,6 +397,5 @@ done
 
 if [[ "${wait_fail}" -eq 1 ]]; then
   dump_log_tail "${API_LOG}" "API"
-  EXIT_CODE=1
-  cleanup 1
+  exit 1
 fi
