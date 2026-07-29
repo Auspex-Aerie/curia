@@ -8,7 +8,9 @@ import { anchorOffsetIn, consumeScrollAnchor, restoreViewportScroll } from './sc
 import { buildTurnContext } from './turn-context';
 import {
   assistantMessages,
+  dismissOnboardingBanner,
   getState,
+  loadOnboardingBannerDismissed,
   patch,
   selectConversation,
   selectTurn,
@@ -17,11 +19,12 @@ import {
   setSessionQuery,
   setSessionsError,
   setSessionsLoading,
+  setSettingsTab,
   setTheme,
   setWorkspaceView,
   subscribe,
 } from './store';
-import type { DeckView } from './types';
+import type { DeckView, WorkspaceView } from './types';
 import { startLivePoll } from './live-poll';
 import { formatDuration, timelineStepTimer, totalElapsedMs } from './runtime';
 import { syncRuntimeClock } from './runtime-clock';
@@ -32,6 +35,12 @@ import { resetModelTab } from './viewers/council';
 import { renderDeckViewport } from './viewers/deck';
 import { parseDeckLocation, pushDeckLocation, replaceDeckLocation } from './session-url';
 import { renderSessionsPage } from './sessions-view';
+import {
+  ensureSettingsLoaded,
+  refreshSetupStatus,
+  renderOnboardingBanner,
+  renderSettingsPage,
+} from './settings-page';
 import './deck.css';
 
 const COUNCIL_TIMELINE: { id: DeckView; label: string }[] = [
@@ -62,6 +71,7 @@ export function mountApp(root: HTMLElement) {
   root.innerHTML = `
     <div class="observatory">
       <aside class="rail" id="rail"></aside>
+      <div class="onboarding-host" id="onboarding-host" hidden></div>
       <main class="deck" id="deck"></main>
       <aside class="insp" id="inspector"></aside>
       <div class="verdict-lane" id="verdict"></div>
@@ -74,6 +84,7 @@ export function mountApp(root: HTMLElement) {
     inspector: root.querySelector('#inspector')!,
     verdict: root.querySelector('#verdict')!,
     foot: root.querySelector('#foot')!,
+    onboarding: root.querySelector('#onboarding-host')!,
   };
   subscribe((scope) => {
     if (scope === 'viewport') renderViewportOnly();
@@ -85,6 +96,7 @@ export function mountApp(root: HTMLElement) {
 }
 
 async function bootstrap() {
+  patch({ onboardingBannerDismissed: loadOnboardingBannerDismissed() });
   try {
     const settings = await api.getSettings();
     if (settings?.theme === 'dark' || settings?.theme === 'light') {
@@ -93,8 +105,12 @@ async function bootstrap() {
   } catch {
     setTheme('dark');
   }
+  void refreshSetupStatus();
   const target = parseDeckLocation(window.location.search);
-  patch({ workspaceView: target.page });
+  patch({
+    workspaceView: target.page,
+    ...(target.settingsTab ? { settingsTab: target.settingsTab } : {}),
+  });
   await loadSessionPage(false);
   const firstId = target.conversationId || getState().sessions[0]?.id;
   if (firstId) {
@@ -103,11 +119,15 @@ async function bootstrap() {
         pinned: Boolean(target.conversationId),
         turnIndex: target.turnIndex,
         deckView: target.deckView,
-        preservePage: target.page === 'sessions',
+        preservePage: target.page === 'sessions' || target.page === 'settings',
       });
     } catch {
       const fallback = getState().sessions[0]?.id;
-      if (fallback && fallback !== firstId) await openConversation(fallback, { preservePage: target.page === 'sessions' });
+      if (fallback && fallback !== firstId) {
+        await openConversation(fallback, {
+          preservePage: target.page === 'sessions' || target.page === 'settings',
+        });
+      }
     }
   }
   setWorkspaceView(target.page);
@@ -187,6 +207,11 @@ async function applyBrowserLocation() {
     setWorkspaceView('sessions');
     return;
   }
+  if (target.page === 'settings') {
+    if (target.settingsTab) setSettingsTab(target.settingsTab);
+    setWorkspaceView('settings');
+    return;
+  }
   if (target.conversationId) {
     await openConversation(target.conversationId, {
       pinned: true,
@@ -199,11 +224,21 @@ async function applyBrowserLocation() {
 }
 
 function render() {
-  const sessionsPage = getState().workspaceView === 'sessions';
-  document.querySelector('.observatory')?.classList.toggle('sessions-page', sessionsPage);
+  const view = getState().workspaceView;
+  const fullPage = view === 'sessions' || view === 'settings';
+  document.querySelector('.observatory')?.classList.toggle('sessions-page', view === 'sessions');
+  document.querySelector('.observatory')?.classList.toggle('settings-page', view === 'settings');
+  document.querySelector('.observatory')?.classList.toggle('full-page', fullPage);
   renderRail();
-  if (sessionsPage) {
+  renderOnboardingBanner(els.onboarding || null);
+  bindOnboardingBanner();
+  if (view === 'sessions') {
     renderSessions();
+    els.inspector.innerHTML = '';
+    els.verdict.innerHTML = '';
+    els.foot.innerHTML = '';
+  } else if (view === 'settings') {
+    void renderSettingsWorkspace();
     els.inspector.innerHTML = '';
     els.verdict.innerHTML = '';
     els.foot.innerHTML = '';
@@ -220,7 +255,33 @@ function render() {
   }
 }
 
+function bindOnboardingBanner(): void {
+  const host = els.onboarding;
+  if (!host) return;
+  host.querySelector('[data-open-setup]')?.addEventListener('click', () => {
+    pushNextLocation = true;
+    setSettingsTab('setup');
+    setWorkspaceView('settings');
+  });
+  host.querySelector('[data-dismiss-onboarding]')?.addEventListener('click', () => {
+    dismissOnboardingBanner();
+  });
+}
+
+async function renderSettingsWorkspace(): Promise<void> {
+  // ensureSettingsLoaded is a no-op after first hydrate (Greptile P1: status/render loop).
+  await ensureSettingsLoaded();
+  if (getState().workspaceView !== 'settings') return;
+  renderSettingsPage(els.deck);
+}
+
 function renderPreservingScroll() {
+  // Settings form keeps module-level draft; avoid clobbering mid-edit on poll ticks.
+  if (getState().workspaceView === 'settings') {
+    renderOnboardingBanner(els.onboarding || null);
+    bindOnboardingBanner();
+    return;
+  }
   const inspectorScroll = Object.fromEntries(
     [...els.inspector.querySelectorAll<HTMLElement>('[data-rail-scroll]')].map((element) => [
       element.dataset.railScroll || '',
@@ -253,6 +314,10 @@ function renderPreservingScroll() {
 function renderViewportOnly() {
   if (getState().workspaceView === 'sessions') {
     renderSessions();
+    return;
+  }
+  if (getState().workspaceView === 'settings') {
+    void renderSettingsWorkspace();
     return;
   }
   const vp = els.deck.querySelector('#viewport') as HTMLElement | null;
@@ -345,33 +410,44 @@ function renderRail() {
     ? `<p class="meta poll-err">Live refresh: ${escapeHtml(s.pollError)}</p>`
     : '<p class="meta poll-ok">Live refresh on</p>';
 
-  els.rail.innerHTML = `
-    <div class="rail-head">
-      <h2>Observatory</h2>
-      <button type="button" class="rail-btn" id="btn-settings">⚙</button>
-    </div>
-    ${pollNote}
-    <nav class="workspace-tabs" aria-label="Observatory pages">
-      <button type="button" class="workspace-tab ${s.workspaceView === 'turns' ? 'on' : ''}" data-workspace="turns">Turns</button>
-      <button type="button" class="workspace-tab ${s.workspaceView === 'sessions' ? 'on' : ''}" data-workspace="sessions">Sessions <span>${s.sessionTotal || s.conversations.length}</span></button>
-    </nav>
-    <button type="button" class="rail-btn" id="btn-new">+ New session</button>
-    ${s.workspaceView === 'turns' ? `<div class="rail-turns">
+  const railNote =
+    s.workspaceView === 'turns'
+      ? `<div class="rail-turns">
         <div class="rail-turns-head">
           <h2>Current session</h2>
           <strong>${escapeHtml(sessionTitle)}</strong>
           <span class="meta">${escapeHtml(sessionMode)} · <code>${escapeHtml(s.conversationId || '—')}</code></span>
         </div>
         ${turnsHtml || '<p class="meta">No turns yet — take control to start.</p>'}
-      </div>` : `<div class="sessions-rail-note"><strong>Session memory</strong><p>Use the full-width catalog to search, filter, compare cost, and reopen work by conversation ID.</p></div>`}
+      </div>`
+      : s.workspaceView === 'settings'
+        ? `<div class="sessions-rail-note"><strong>Settings</strong><p>Hot squad, policy, repo, and theme. Catalog editor lands next; secrets stay in .env for now.</p></div>`
+        : `<div class="sessions-rail-note"><strong>Session memory</strong><p>Use the full-width catalog to search, filter, compare cost, and reopen work by conversation ID.</p></div>`;
+
+  els.rail.innerHTML = `
+    <div class="rail-head">
+      <h2>Observatory</h2>
+      <button type="button" class="rail-btn ${s.workspaceView === 'settings' ? 'on' : ''}" id="btn-settings" title="Settings">⚙</button>
+    </div>
+    ${pollNote}
+    <nav class="workspace-tabs" aria-label="Observatory pages">
+      <button type="button" class="workspace-tab ${s.workspaceView === 'turns' ? 'on' : ''}" data-workspace="turns">Turns</button>
+      <button type="button" class="workspace-tab ${s.workspaceView === 'sessions' ? 'on' : ''}" data-workspace="sessions">Sessions <span>${s.sessionTotal || s.conversations.length}</span></button>
+      <button type="button" class="workspace-tab ${s.workspaceView === 'settings' ? 'on' : ''}" data-workspace="settings">Settings</button>
+    </nav>
+    <button type="button" class="rail-btn" id="btn-new">+ New session</button>
+    ${railNote}
   `;
 
-  els.rail.querySelector('#btn-settings')?.addEventListener('click', () => openSettings());
+  els.rail.querySelector('#btn-settings')?.addEventListener('click', () => {
+    pushNextLocation = true;
+    setWorkspaceView('settings');
+  });
   els.rail.querySelector('#btn-new')?.addEventListener('click', () => void createSession());
   els.rail.querySelectorAll('[data-workspace]').forEach((button) => {
     button.addEventListener('click', () => {
       pushNextLocation = true;
-      setWorkspaceView((button as HTMLElement).dataset.workspace as 'turns' | 'sessions');
+      setWorkspaceView((button as HTMLElement).dataset.workspace as WorkspaceView);
     });
   });
   els.rail.querySelectorAll('[data-turn]').forEach((btn) => {
@@ -592,43 +668,3 @@ async function createSession() {
   await openConversation(conv.id, { pinned: true, pushHistory: true });
 }
 
-function openSettings() {
-  const backdrop = document.createElement('div');
-  backdrop.className = 'settings-backdrop';
-  backdrop.innerHTML = `
-    <div class="settings-panel">
-      <h2>Settings</h2>
-      <label>Theme<select id="set-theme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
-      <label>Arena squad<select id="set-squad"><option value="normal">normal</option></select></label>
-      <div style="display:flex;gap:8px;margin-top:16px">
-        <button type="button" class="rail-btn" id="set-save">Save</button>
-        <button type="button" class="rail-btn" id="set-close">Close</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(backdrop);
-  api.getSettings().then((data) => {
-    const theme = backdrop.querySelector('#set-theme') as HTMLSelectElement;
-    const squad = backdrop.querySelector('#set-squad') as HTMLSelectElement;
-    if (theme && data?.theme) theme.value = data.theme;
-    (data?.available_squads || []).forEach((sq: { name: string; label: string }) => {
-      const opt = document.createElement('option');
-      opt.value = sq.name;
-      opt.textContent = sq.label || sq.name;
-      squad?.appendChild(opt);
-    });
-    if (squad && data?.arena_squad) squad.value = data.arena_squad;
-  });
-  backdrop.querySelector('#set-close')?.addEventListener('click', () => backdrop.remove());
-  backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) backdrop.remove();
-  });
-  backdrop.querySelector('#set-save')?.addEventListener('click', async () => {
-    const theme = (backdrop.querySelector('#set-theme') as HTMLSelectElement).value;
-    const squad = (backdrop.querySelector('#set-squad') as HTMLSelectElement).value;
-    setTheme(theme as 'light' | 'dark');
-    await api.applySquad(squad);
-    await api.updateSettings({ theme });
-    backdrop.remove();
-  });
-}

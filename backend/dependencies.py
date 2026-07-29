@@ -23,7 +23,14 @@ from .storage_service import StorageService
 
 SETTINGS_PATH = Path("data/config.json")
 _PERSISTED_SETTINGS_KEYS = frozenset(
-    {"arena_models", "chairman_model", "arena_squad", "theme", "repo_root"}
+    {
+        "arena_models",
+        "chairman_model",
+        "arena_squad",
+        "squad_policy",
+        "theme",
+        "repo_root",
+    }
 )
 
 
@@ -34,15 +41,19 @@ _PERSISTED_SETTINGS_KEYS = frozenset(
 
 def load_runtime_settings() -> Dict[str, Any]:
     """Load persisted settings merged with defaults."""
+    from .settings_status import DEFAULT_SQUAD_POLICY, normalize_squad_policy
+
     defaults = {
         "arena_models": ARENA_MODELS,
         "chairman_model": CHAIRMAN_MODEL,
         "arena_squad": ARENA_SQUAD,
+        "squad_policy": DEFAULT_SQUAD_POLICY,
         "available_squads": list_squad_summaries(),
         "theme": "light",
         "repo_root": ".",
     }
     if not SETTINGS_PATH.exists():
+        defaults["available_squads"] = list_squad_summaries()
         return defaults
     try:
         data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
@@ -58,15 +69,26 @@ def load_runtime_settings() -> Dict[str, Any]:
         )
     except Exception:
         pass
+    defaults["squad_policy"] = normalize_squad_policy(defaults.get("squad_policy"))
     defaults["available_squads"] = list_squad_summaries()
     return defaults
 
 
 def save_runtime_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Save runtime settings to disk."""
+    from .settings_status import normalize_squad_policy
+
     current = load_runtime_settings()
     for k, v in payload.items():
-        if k in _PERSISTED_SETTINGS_KEYS:
+        if k not in _PERSISTED_SETTINGS_KEYS:
+            continue
+        if k == "squad_policy":
+            current[k] = normalize_squad_policy(v)
+        elif k == "arena_models" and v is not None:
+            current[k] = [str(m).strip() for m in v if str(m).strip()]
+        elif k in {"chairman_model", "arena_squad", "theme", "repo_root"} and v is not None:
+            current[k] = str(v).strip() if isinstance(v, str) else v
+        else:
             current[k] = v
     persisted = {k: current[k] for k in _PERSISTED_SETTINGS_KEYS if k in current}
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)

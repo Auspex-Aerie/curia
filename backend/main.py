@@ -13,14 +13,20 @@ from .routes.sessions import router as sessions_router
 from .routes.settings import router as settings_router
 from .routes.turns import router as turns_router
 
+# Explicit common ports (docs / defaults). Regex covers alternate Vite ports
+# when 5173 is taken (e.g. PolitySphere) so Observatory is not CORS-blocked.
 LOCAL_ORIGINS = (
     "http://localhost:5173",
     "http://localhost:5174",
+    "http://localhost:5175",
     "http://localhost:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
+    "http://127.0.0.1:5175",
     "http://127.0.0.1:3000",
 )
+# Any localhost / 127.0.0.1 port for local Observatory + API splits.
+LOCAL_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
 
 
 def create_app() -> FastAPI:
@@ -41,6 +47,7 @@ def create_app() -> FastAPI:
     application.add_middleware(
         CORSMiddleware,
         allow_origins=list(LOCAL_ORIGINS),
+        allow_origin_regex=LOCAL_ORIGIN_REGEX,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

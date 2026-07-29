@@ -7,7 +7,52 @@ export type InspectorColumn = 'context' | 'rankings' | 'quality';
 
 export type TurnStatus = 'running' | 'complete' | 'idle' | 'failed';
 
-export type WorkspaceView = 'turns' | 'sessions';
+export type WorkspaceView = 'turns' | 'sessions' | 'settings';
+
+export type SettingsTab = 'setup' | 'squad' | 'repository' | 'appearance';
+
+export interface SetupCheck {
+  id: string;
+  ok: boolean;
+  severity: 'error' | 'warning' | 'info' | string;
+  label: string;
+  detail: string;
+  fix?: string | null;
+}
+
+export interface SetupStatus {
+  ready: boolean;
+  score: { ready: number; total: number };
+  checks: SetupCheck[];
+  settings: {
+    arena_models?: string[];
+    chairman_model?: string;
+    arena_squad?: string;
+    squad_policy?: 'quorum' | 'require_all';
+    theme?: 'light' | 'dark';
+    repo_root?: string;
+  };
+  available_squads?: Array<{
+    name: string;
+    label?: string;
+    description?: string;
+    arena_count?: number;
+    chairman_model?: string;
+  }>;
+  field_meta?: Record<string, { apply?: string; section?: string; note?: string }>;
+  freeze?: Record<string, unknown>;
+  secrets?: Record<
+    string,
+    {
+      present?: boolean;
+      writable?: boolean;
+      write_supported?: boolean;
+      hint?: string;
+      value?: string;
+    }
+  >;
+  onboarding?: { hard_gate?: boolean; banner_when_not_ready?: boolean };
+}
 
 export interface ConversationSummary {
   id: string;
@@ -303,4 +348,9 @@ export interface DeckState {
   runtimeTick: number;
   theme: 'light' | 'dark';
   settingsOpen: boolean;
+  settingsTab: SettingsTab;
+  setupStatus: SetupStatus | null;
+  setupStatusError: string | null;
+  /** Session-dismissed soft onboarding banner (local only). */
+  onboardingBannerDismissed: boolean;
 }

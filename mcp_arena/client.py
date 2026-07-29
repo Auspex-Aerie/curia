@@ -203,6 +203,9 @@ class ArenaClient:
     async def update_settings(self, **fields: Any) -> Dict[str, Any]:
         return await self._request("POST", "/api/settings", json=fields)
 
+    async def get_setup_status(self) -> Dict[str, Any]:
+        return await self._request("GET", "/api/settings/status")
+
     async def ensure_indexed(
         self,
         conversation_id: str,

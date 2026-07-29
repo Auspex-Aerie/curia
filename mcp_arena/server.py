@@ -324,20 +324,32 @@ async def config_validate() -> str:
 async def update_settings(
     arena_models: Optional[List[str]] = None,
     chairman_model: Optional[str] = None,
+    arena_squad: Optional[str] = None,
+    squad_policy: Optional[str] = None,
     theme: Optional[str] = None,
     repo_root: Optional[str] = None,
 ) -> str:
-    """Update runtime settings persisted to data/config.json."""
+    """Update runtime hot settings (data/config.json). squad_policy: quorum|require_all."""
     fields: Dict[str, Any] = {}
     if arena_models is not None:
         fields["arena_models"] = arena_models
     if chairman_model is not None:
         fields["chairman_model"] = chairman_model
+    if arena_squad is not None:
+        fields["arena_squad"] = arena_squad
+    if squad_policy is not None:
+        fields["squad_policy"] = squad_policy
     if theme is not None:
         fields["theme"] = theme
     if repo_root is not None:
         fields["repo_root"] = repo_root
     return _json(await _get_client().update_settings(**fields))
+
+
+@mcp.tool()
+async def get_setup_status() -> str:
+    """Soft readiness checklist for onboarding (never a hard gate)."""
+    return _json(await _get_client().get_setup_status())
 
 
 def main() -> None:
