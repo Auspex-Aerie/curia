@@ -8,10 +8,30 @@ import type {
   SetupStatus,
 } from './types';
 
-type ViteImportMeta = ImportMeta & { env?: { VITE_API_BASE?: string } };
+type ViteClientEnv = {
+  VITE_API_BASE?: string;
+  DEV: boolean;
+  PROD: boolean;
+  MODE: string;
+};
 
-export const API_BASE =
-  (import.meta as ViteImportMeta).env?.VITE_API_BASE || 'http://localhost:8001';
+/**
+ * API origin for fetch().
+ * - Dev default: same origin (''), so /api goes through the Vite proxy → 127.0.0.1:8001
+ *   (fixes WSL2: Windows browser could open :5173 but refused :8001 / localhost IPv6).
+ * - Prod build default: http://127.0.0.1:8001 (IPv4; avoid localhost → ::1 footgun).
+ * - Override anytime with VITE_API_BASE (set to empty string for same-origin production).
+ */
+function resolveApiBase(): string {
+  const env = (import.meta as ImportMeta & { env: ViteClientEnv }).env;
+  if (Object.prototype.hasOwnProperty.call(env, 'VITE_API_BASE') && typeof env.VITE_API_BASE === 'string') {
+    return env.VITE_API_BASE.replace(/\/$/, '');
+  }
+  if (env.DEV) return '';
+  return 'http://127.0.0.1:8001';
+}
+
+export const API_BASE = resolveApiBase();
 
 type JsonRecord = Record<string, unknown>;
 type ManualContext = JsonRecord[];
@@ -51,8 +71,20 @@ const JSON_HEADERS = {
   'X-Curia-Origin': 'observatory',
 };
 
+function apiOriginBase(): string {
+  if (API_BASE) {
+    return API_BASE.endsWith('/') ? API_BASE : `${API_BASE}/`;
+  }
+  // Same-origin / Vite proxy: resolve against the page (browser) or a local fallback (SSR-less).
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/`;
+  }
+  return 'http://127.0.0.1:5173/';
+}
+
 function endpoint(path: string, params: Record<string, unknown> = {}): URL {
-  const url = new URL(path, `${API_BASE}/`);
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  const url = new URL(normalized, apiOriginBase());
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== '') {
       url.searchParams.set(key, String(value));
