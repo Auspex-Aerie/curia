@@ -5,6 +5,7 @@ import type {
   Conversation,
   ConversationSummary,
   SessionPage,
+  SetupStatus,
 } from './types';
 
 type ViteImportMeta = ImportMeta & { env?: { VITE_API_BASE?: string } };
@@ -22,10 +23,20 @@ type StreamEvent = {
 };
 type StreamHandler = (eventType: string, event: StreamEvent) => void;
 
-interface RuntimeSettings extends JsonRecord {
+export interface RuntimeSettings extends JsonRecord {
   theme?: 'light' | 'dark';
   arena_squad?: string;
-  available_squads?: Array<{ name: string; label: string }>;
+  arena_models?: string[];
+  chairman_model?: string;
+  squad_policy?: 'quorum' | 'require_all';
+  repo_root?: string;
+  available_squads?: Array<{
+    name: string;
+    label?: string;
+    description?: string;
+    arena_count?: number;
+    chairman_model?: string;
+  }>;
 }
 
 export interface SessionQuery {
@@ -251,6 +262,10 @@ class CuriaApiClient {
     return jsonRequest(endpoint('/api/settings'), {}, 'Unable to load settings');
   }
 
+  getSetupStatus(): Promise<SetupStatus> {
+    return jsonRequest(endpoint('/api/settings/status'), {}, 'Unable to load setup status');
+  }
+
   updateSettings(payload: JsonRecord): Promise<RuntimeSettings> {
     return jsonRequest(
       endpoint('/api/settings'),
@@ -265,6 +280,10 @@ class CuriaApiClient {
       { method: 'POST' },
       'Unable to apply the squad',
     );
+  }
+
+  catalogModels(): Promise<JsonRecord> {
+    return jsonRequest(endpoint('/api/catalog/models'), {}, 'Unable to load catalog models');
   }
 
   catalogEffectiveLimits(squad?: string): Promise<JsonRecord> {

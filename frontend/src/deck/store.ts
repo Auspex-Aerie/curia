@@ -13,6 +13,8 @@ import type {
   SessionFacets,
   SessionFilters,
   SessionSummary,
+  SettingsTab,
+  SetupStatus,
   WorkspaceView,
 } from './types';
 
@@ -80,6 +82,10 @@ const initial: DeckState = {
   runtimeTick: 0,
   theme: 'light',
   settingsOpen: false,
+  settingsTab: 'setup',
+  setupStatus: null,
+  setupStatusError: null,
+  onboardingBannerDismissed: false,
 };
 
 let state: DeckState = { ...initial };
@@ -229,6 +235,31 @@ export function updateConversations(
 
 export function setWorkspaceView(view: WorkspaceView) {
   patch({ workspaceView: view });
+}
+
+export function setSettingsTab(tab: SettingsTab) {
+  patch({ settingsTab: tab });
+}
+
+export function setSetupStatus(status: SetupStatus | null, error: string | null = null) {
+  patch({ setupStatus: status, setupStatusError: error });
+}
+
+export function dismissOnboardingBanner() {
+  try {
+    sessionStorage.setItem('curia.onboardingBannerDismissed', '1');
+  } catch {
+    /* ignore */
+  }
+  patch({ onboardingBannerDismissed: true });
+}
+
+export function loadOnboardingBannerDismissed(): boolean {
+  try {
+    return sessionStorage.getItem('curia.onboardingBannerDismissed') === '1';
+  } catch {
+    return false;
+  }
 }
 
 export function setSessionQuery(filters: SessionFilters, sort = state.sessionSort) {
