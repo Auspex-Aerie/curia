@@ -2,108 +2,74 @@
 
 *Latin: the chamber where deliberation happens.*
 
-**Curia is a local-first, multi-model deliberation system grounded in your codebase.** It runs several models through a chosen discussion structure, records the complete execution trace, and gives a chairman model the material needed to produce a final answer.
+**Your coding agent only gets one context window and one training distribution.**  
+Curia runs a multi-model deliberation **outside** that window—grounded in your repo when you want code in the loop—and returns a traced verdict you can use without stuffing a whole council into the main session. Drive it from the agent you already use (MCP). Watch paths, provenance, and cost in the **Observatory** when you want a first-class UI over the same run.
 
-Curia was independently implemented by Auspex Labs and inspired by Andrej Karpathy's [llm-council](https://github.com/karpathy/llm-council) concept. The classic three-stage council is the default mode; Curia's additional modes, CodeRAG pipeline, agent control plane, storage model, and Observatory are its own.
+Often low-cost with free or cheap squads; reliable dogfood prefers paid low-cost presets. No application auth—bind to localhost or a trusted network.
 
-> **Build in public:** [Auspex-Aerie/curia](https://github.com/Auspex-Aerie/curia). Architecture and product decisions are recorded in the [decision log](docs/decision_log.md).
+🚧 **[Build in public](https://github.com/Auspex-Aerie/curia)** · decisions in the [decision log](docs/decision_log.md)
 
-## At a glance
+Independently implemented by Auspex Labs; inspired by Andrej Karpathy’s [llm-council](https://github.com/karpathy/llm-council) (answer → anonymous peer ranking → chair). Curia’s modes, CodeRAG, MCP control plane, storage, and Observatory are its own.
 
-| Area | What Curia provides |
-|------|---------------------|
-| **Deliberation** | Six orchestration modes: Council, Round Robin, Fight, Stacks, Complex Iterative, and Complex Questioning |
-| **Grounding** | Conversation-scoped CodeRAG with AST chunking, ColBERT retrieval, entity and graph signals, RRF fusion, and cross-encoder reranking |
-| **Observability** | A canonical execution trace, prompt provenance, model failures, quality status, token usage, cost, and per-step timing |
-| **Interface** | A watch-first Observatory with mode-aware turn views and a full-width, searchable Sessions catalog |
-| **Agent control** | A 30-tool MCP server over the HTTP API for driving and inspecting Curia from coding agents |
-| **Storage** | Canonical conversation JSON plus a rebuildable SQLite projection for session queries |
+---
 
 ## Quick start
 
-Requirements: Python 3.10+, [uv](https://docs.astral.sh/uv/), Node.js/npm, and an [OpenRouter](https://openrouter.ai/) API key.
+Needs Python 3.10+, [uv](https://docs.astral.sh/uv/), Node.js/npm, [OpenRouter](https://openrouter.ai/) API key.
 
 ```bash
 uv sync
 cd frontend && npm install && cd ..
-cp .env.example .env   # set OPENROUTER_API_KEY
+cp .env.example .env   # OPENROUTER_API_KEY=...
 ./start.sh
 ```
 
-Open [http://localhost:5173](http://localhost:5173). The script starts the FastAPI backend on `127.0.0.1:8001` and the Observatory on `127.0.0.1:5173`; both hosts and the API port can be changed with `CURIA_API_HOST`, `CURIA_API_PORT`, and `CURIA_WEB_HOST`.
+- Observatory: [http://localhost:5173](http://localhost:5173)  
+- API: `http://127.0.0.1:8001` (`CURIA_API_HOST` / `CURIA_API_PORT` / `CURIA_WEB_HOST` override)
 
-Curia currently has no application-level authentication. Keep the API and Observatory on localhost or a trusted network boundary.
-
-The default learned ColBERT path does not require LM Studio. LM Studio is needed only when `SEMANTIC_BACKEND=biencoder`; see [RAG_LMSTUDIO.md](RAG_LMSTUDIO.md).
-
-### Alternative: pip + requirements.txt
-
-If you prefer pip over uv, install `torch` for your platform **first** (its wheels are platform- and CUDA-specific), then the rest from [`requirements.txt`](requirements.txt):
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-
-# 1. torch for your platform (pick one):
-pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cu126  # NVIDIA CUDA 12.x
-pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu    # CPU-only (Linux/Windows)
-pip install torch==2.11.0                                                     # macOS (Apple Silicon / MPS)
-# ...or use the selector at https://pytorch.org/get-started/locally/
-
-# 2. Everything else (torch is already satisfied):
-pip install -r requirements.txt
-cd frontend && npm install && cd ..
-cp .env.example .env   # set OPENROUTER_API_KEY
-```
-
-The server runs under **uvicorn**. `./start.sh` launches it (and the Observatory) via `uv`; under a pip venv, run them directly:
-
-```bash
-uvicorn backend.main:app --host 127.0.0.1 --port 8001   # backend (this is how start.sh runs it too)
-cd frontend && npm run dev                              # Observatory (separate shell)
-```
-
-`uv sync` remains the recommended, fully-locked path; `pyproject.toml` + `uv.lock` stay the source of truth.
-
-### First run
-
-Regardless of install path, two steps happen the first time you use code grounding — the API and Observatory start fine without them, but grounded deliberation does not work until they complete:
-
-- **Model downloads from HuggingFace (not Git LFS).** Retrieval weights live on the HuggingFace Hub — PyLate ColBERT (`colbert-ir/colbertv2.0`), `jinaai/jina-reranker-v3`, and the query-router backbone (`sentence-transformers/all-MiniLM-L6-v2`). They are **not** vendored in this repo. Prefetch before the first grounded query to avoid multi-GB cold starts mid-turn:
+**First grounded run:** prefetch retrieval models (HuggingFace Hub, not Git LFS), then index a repo (settings `repo_root` or MCP reindex).
 
 ```bash
 uv run curia-prefetch-rag
-# optional dedicated cache:
-CURIA_HF_HOME=~/.cache/curia-hf uv run curia-prefetch-rag --cache-dir ~/.cache/curia-hf
 ```
 
-Without prefetch, the first grounded query downloads lazily. Device is auto-detected (`COLBERT_DEVICE=auto`) with CPU fallback.
-- **Repository indexing.** Grounding is empty until you point Curia at a repository and index it: set its `repo_root` (Observatory settings, persisted to `data/config.json`) and trigger indexing from the Observatory, or over MCP (`get_index_manifest` → `reindex`). Indexing builds a per-conversation snapshot from the configured Git working tree or an uploaded ZIP.
+Optional: `CURIA_HF_HOME=~/.cache/curia-hf uv run curia-prefetch-rag --cache-dir ~/.cache/curia-hf`  
+Pip install and bi-encoder/LM Studio path: [RAG_LMSTUDIO.md](RAG_LMSTUDIO.md).
 
-## The Observatory
+---
 
-The Observatory separates active deliberation from session history:
+## What you get
 
-- **Turns** shows the current session, its distinct turns, mode-specific execution views, context and prompt provenance, rankings where applicable, quality evidence, and the final verdict.
-- **Sessions** is a full-width catalog with activity dates, caller and origin, mode and squad, turn/message counts, outcome, duration, token/call totals, and cost. Search filters the loaded rows immediately; facet controls re-query SQLite; scrolling loads additional pages lazily.
-- **Inspector** is split into participants, a mode-aware deliberation pulse, and selectable cost series for the current session, matching squad, or all remembered sessions. Single-series views can be broken down by model, top session, week, or month as appropriate.
+| | |
+|--|--|
+| **Deliberation** | Six modes (Council default), configurable squads, chair synthesis |
+| **Grounding** | Conversation-scoped CodeRAG (AST chunks, ColBERT, graph, RRF, neural rerank) |
+| **Observatory** | Watch-first UI: turns, step topology, provenance, rankings, quality, cost, Sessions catalog |
+| **Agents** | MCP server (`curia-mcp`) over the HTTP API—full turns + inspection |
+| **Evidence** | Canonical execution trace, prompt provenance, failures, `execution_quality` |
 
-Conversation IDs and session links are shareable URLs. The deck live-polls the backend, so turns started through MCP appear without being initiated in the browser. **Take control** enables the turn composer when you do want to continue a session from the UI.
+**MCP sketch** (API already up):
 
-The Context view distinguishes three different things:
+```bash
+uv run curia-mcp
+```
 
-1. the user's grounded prompt and whether CodeRAG supplied context;
-2. Curia-owned orchestration text injected at each stage; and
-3. artifacts handed from earlier models or stages to later ones.
+```text
+get_index_manifest → reindex if needed → create_conversation → send_message
+  → check execution_quality, trace, failures, cost
+```
 
-The injection workflow is clickable: artifact references link back to their producing answers, while RAG links open the retrieved-source view rather than duplicating repository text inside orchestration prompts.
+`send_message` is mode-agnostic. Always treat `execution_quality.acceptable` as the real success signal. Tool map: [agent control plane](docs/agent-control-plane-architecture.md).
+
+---
 
 ## Deliberation modes
 
-Every mode uses the same canonical trace contract, but each has its own topology and visual treatment.
+Same trace contract; different topologies. Details and design history: [decision log](docs/decision_log.md), mode notes in [PIV-002](docs/piv-002-observatory-ui.md).
 
 ### Council (default)
 
-Models answer independently, anonymously rank the collected answers, and a chairman synthesizes the responses and peer rankings.
+Independent answers → anonymous peer rankings → chair synthesis.
 
 ```text
 query + context
@@ -115,38 +81,34 @@ query + context
       └─────────────────────────┴── chairman final
 ```
 
-The aggregate ranking is calculated from each model's parsed ordering. It is evidence for the chairman and the user, not a replacement for the final synthesis.
-
 ### Round Robin
 
-Models refine one shared draft sequentially. Each model receives its grounded base prompt and the latest predecessor draft. `@iterations <n>` runs additional passes over the squad before the chairman receives the latest draft and original grounded question.
+Sequential draft handoff; `@iterations <n>` for more passes before the chair.
 
 ```text
-query + context ── model A ── model B ── model C ── … ── chairman final
-                         latest draft moves forward
+query + context ── A ── B ── C ── … ── chairman final
+                    latest draft moves forward
 ```
 
 ### Fight
 
-All models take an opening position, critique peer positions, then defend or revise their own answer against peer critiques. The chairman receives the openings, critiques, and defenses.
+Open → critique → defend → chair.
 
 ```text
-openings (parallel) ── peer critiques ── defenses ── chairman final
+openings ── peer critiques ── defenses ── chairman final
 ```
 
 ### Stacks
 
-The first two models answer, the chairman merges their answers, and the remaining models critique the merge. The chairman judges the merge against those critiques, the original two models defend or repair it, and the chairman produces the final report.
-
-With a two-model squad, those same two models also serve as critics.
+Two generators → chair merge → critics → chair judgment → defenses → chair final.
 
 ```text
-2 answers ── chair merge ── critics ── chair judgment ── 2 defenses ── chair final
+2 answers ── merge ── critics ── judgment ── 2 defenses ── chair final
 ```
 
 ### Complex Iterative
 
-The first two arena models alternate through a fixed two-cycle extract/expand chain. The first model extracts intent, constraints, and a next prompt; the second expands the prior extract with actionable detail. After four hops, the chairman answers from the original grounded question and latest chain state.
+Fixed extract/expand chain (first two models under default `quorum` policy; extras are reserves).
 
 ```text
 extract ── expand ── extract ── expand ── chairman final
@@ -154,180 +116,92 @@ extract ── expand ── extract ── expand ── chairman final
 
 ### Complex Questioning
 
-All models answer, then reassess their own answer through the other answers. The chairman turns those reflections into a brief; each model muses on that brief alone; the chairman then synthesizes the brief and muse round.
+Answers → self-question via peers → chair brief → muses → chair final.
 
 ```text
-answers ── self-questioning through peers ── chair brief ── muses ── chair final
+answers ── self-question ── chair brief ── muses ── chair final
 ```
 
-## Code grounding and context
+---
 
-CodeRAG indexes a ZIP snapshot or configured Git working tree per conversation. Its current pipeline includes:
+## Code grounding (short)
 
-- tree-sitter AST chunking for Python, Rust, JavaScript, TypeScript/TSX, and Go;
-- learned PyLate ColBERT retrieval by default, with an optional FAISS/LM Studio bi-encoder path;
-- entity seeds and an append-only code graph;
-- reciprocal-rank fusion, an embedding query router, and Jina v3 cross-encoder reranking;
-- manifest-based file-level delta indexing and index-freshness APIs; and
-- explicit source, score, size, and estimated-token records for retrieved chunks.
+Per-conversation index of a Git tree or ZIP: tree-sitter chunks (Py/Rust/JS/TS/Go), ColBERT (default) or bi-encoder, entity + graph, RRF, Jina v3 rerank, delta reindex. Manual files replace RAG for that request. Full env and APIs: [RAG_LMSTUDIO.md](RAG_LMSTUDIO.md). Hub layout for Auspex models: [docs/hf_hub.md](docs/hf_hub.md).
 
-Manual context can be supplied through the HTTP API or CLI. When manual files are present, they replace retrieval for that request.
-
-Preview the context selected for a query without running a deliberation:
+Preview context without a full turn:
 
 ```bash
-python -m backend.cli_context \
-  --conversation <id> \
-  --query "How does authentication work?"
-
-# Force one or more files and bypass RAG for this request:
-python -m backend.cli_context \
-  --conversation <id> \
-  --query "Review this implementation" \
-  --manual-file backend/main.py
+python -m backend.cli_context --conversation <id> --query "How does auth work?"
 ```
 
-### Reliable query directives
+### Directives
 
-Directives are removed from the user text before prompting.
+Stripped from the user text before prompting.
 
-| Directive | Current effect |
-|-----------|----------------|
-| `@norag` / `@raw` | Skip retrieval for this turn |
-| `@lastchair` | When one exists, use the previous chairman response as context and skip retrieval |
-| `@tokenbudget <n>` | Cap the per-model prompt budget for the turn |
-| `@iterations <n>` | Set the number of Round Robin squad passes |
-| `@temp <0–1>` | Sampling temperature for every model call on this turn |
-| `@maxtokens <n>` | `max_tokens` for every model call on this turn |
-| `@trace` / `@debug` | Attach retrieval/debug detail on the assistant turn (`metadata.retrieval_trace`) |
-| `@short` / `@detailed` | Add a response-length instruction to model prompts |
-| `@cite` | Ask models to cite supplied context as `[file:line]` |
-| `@noexecute` | Add a reasoning-only, no-tools instruction to model prompts |
-| `@reset` | Clear the conversation state instead of running a turn |
+| Directive | Effect |
+|-----------|--------|
+| `@norag` / `@raw` | Skip retrieval |
+| `@lastchair` | Prior chair as context (when present) |
+| `@tokenbudget <n>` | Cap per-model prompt budget |
+| `@iterations <n>` | Round Robin passes |
+| `@temp <0–1>` / `@maxtokens <n>` | Sampling for every call this turn |
+| `@trace` / `@debug` | `metadata.retrieval_trace` |
+| `@short` / `@detailed` / `@cite` / `@noexecute` | Prompt-level instructions (not hard policy) |
+| `@reset` | Clear conversation state |
 
-Prompt-level instructions (`@short`, `@detailed`, `@cite`, `@noexecute`) are requests to the selected models, not independently enforced policy controls. `@safe` / `@relaxed` are **not** supported (no multi-tier safety system); they parse only to emit a warning.
+---
 
-## Agent control with MCP
+## Configuration (short)
 
-Run the API, then start Curia's stdio MCP server:
+**Squads** (`backend/squads/`, override with `ARENA_SQUAD` or Observatory Settings):
 
-```bash
-uv run uvicorn backend.main:app --host 127.0.0.1 --port 8001
-uv run curia-mcp
-```
+| Squad | Role |
+|-------|------|
+| `normal` | Default free arena + Gemini chair |
+| `freebee9` | Larger free arena |
+| `cheap_pros` | Low-cost paid—better for reliable dogfood |
 
-`CURIA_API_URL` defaults to `http://127.0.0.1:8001`. Set `CURIA_AGENT_ID` to record who initiated agent-driven work. Legacy `ARENA_*` aliases remain accepted for compatibility.
-
-A typical full-turn flow is:
-
-```text
-get_index_manifest
-  → reindex when needed
-  → create_conversation
-  → send_message
-  → inspect execution_quality, trace, failures, and cost
-```
-
-`send_message` is the mode-agnostic full-turn tool. For Council only, `run_council_turn` is a convenience wrapper around the lower-level `create_turn` / `advance_turn` lifecycle. Always check `execution_quality.acceptable` before treating the chairman response as a successful run; a transport-level success does not guarantee that every required model stage succeeded.
-
-See [Agent Control Plane Architecture](docs/agent-control-plane-architecture.md) for the tool map and response contracts.
-
-## Configuration
-
-### Squad presets
-
-Squads live in `backend/squads/` and define both arena participants and the chairman.
-
-| Squad | Arena | Chairman |
-|-------|-------|----------|
-| `normal` (default) | 5 diverse free models | `google/gemini-2.5-pro` |
-| `freebee9` | 9 free models | `google/gemini-2.5-pro` |
-| `cheap_pros` | 4 low-cost paid models | `deepseek/deepseek-v4-flash` |
-
-Choose the startup default in `.env`:
-
-```bash
-ARENA_SQUAD=cheap_pros
-```
-
-The Observatory's **Settings → Arena squad** control persists a selection to `data/config.json`. Persisted runtime settings take precedence over the environment default. Settings also controls the light/dark theme.
-
-### Retrieval environment
+**Retrieval** (essentials; full list in [RAG_LMSTUDIO.md](RAG_LMSTUDIO.md)):
 
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-...
-
-# Default semantic path
-SEMANTIC_BACKEND=colbert       # colbert | biencoder
-COLBERT_LEARNED=true
-COLBERT_DEVICE=auto            # CUDA when available, otherwise CPU
-
-# Retrieval topology
-QUERY_ROUTER=embedding         # embedding | regex
-FUSION_MODE=rrf                # rrf | max_score
-GRAPH_MODE=append              # append | resort
+SEMANTIC_BACKEND=colbert    # or biencoder
+COLBERT_DEVICE=auto
+QUERY_ROUTER=embedding
+FUSION_MODE=rrf
 RERANK_MODEL=jinaai/jina-reranker-v3
-RERANK_ENABLED=true
-RETRIEVE_CANDIDATES=50
-RERANK_TOP_K=20
-CONTEXT_CHUNK_CAP=60
-
-# Only used by SEMANTIC_BACKEND=biencoder
-LMSTUDIO_BASE_URL=http://localhost:1234/v1
-LMSTUDIO_EMBED_MODEL=text-embedding-nomic-embed-text-v1.5
 ```
 
-### Model context limits
+Model limits: `data/model_catalog.yaml`. Runtime policy: `data/arena_config.yaml` (frozen at process start).
 
-Registered model limits and tags live in `data/model_catalog.yaml`. Allocation policy—including the 85% safety margin, 4,000-token output allowance, fallback limit, and tag modifiers—lives in `data/arena_config.yaml`. These files are frozen at process start; restart the backend after changing them.
+---
 
-Accepted runtime observations may supersede a registered planning limit. `backend/config.py` retains fallback limits for uncatalogued and legacy model IDs.
-
-## Architecture
-
-- **Backend:** FastAPI, Python 3.10+, async httpx, OpenRouter API
-- **Frontend:** vanilla TypeScript, Vite 7, `marked` with DOMPurify, highlight.js
-- **Agent control:** FastMCP in `mcp_arena/`; `curia-mcp` entry point, with deprecated `arena-mcp` alias
-- **RAG:** tree-sitter, PyLate ColBERT or FAISS bi-encoder, entity/graph hybrid retrieval, Jina v3 reranking
-- **Storage:** conversation JSON as the source of truth; SQLite as a reconciled, rebuildable Sessions projection
-- **Configuration:** squad JSON plus startup-frozen model catalog and arena policy YAML
-
-## Development checks
+## Development
 
 ```bash
-# Backend unit suite used by CI (evaluation workloads excluded)
 uv run pytest tests/unit -m "not eval"
-
-# Frontend type-check and production build
 cd frontend && npm run build
 ```
 
-The retrieval evaluation harnesses are intentionally separate from the ordinary unit suite:
+Eval harnesses (separate): `python -m backend.run_hyp001` / `run_hyp002`.
 
-```bash
-python -m backend.run_hyp001
-python -m backend.run_hyp002
-```
+**Stack:** FastAPI · vanilla TS / Vite Observatory · FastMCP · conversation JSON + SQLite Sessions projection.
 
-## Documentation
+## More docs
 
-- [RAG_LMSTUDIO.md](RAG_LMSTUDIO.md) — retrieval setup, topology, environment, and indexing APIs
-- [Decision log](docs/decision_log.md) — append-only decisions, incidents, hypotheses, and deferrals
-- [Agent control plane](docs/agent-control-plane-architecture.md) — MCP architecture, tools, and contracts
-- [PIV-001 checklist](docs/piv-001-checklist.md) — agent-control implementation status and open work
-- [PIV-002 Observatory](docs/piv-002-observatory-ui.md) — accepted Observatory direction and design history
-- [PIV-003 Curia rebrand](docs/piv-003-curia-rebrand.md) — completed rename tiers and remaining compatibility work
-- [DEC-018 frozen configuration](docs/dec-018-catalog-config-summarizer.md) — model catalog, limit observations, summarizer, and prompt registry
-- [LICENSING.md](LICENSING.md) — source-tree and repository-history licensing boundary
+| Doc | Topic |
+|-----|--------|
+| [RAG_LMSTUDIO.md](RAG_LMSTUDIO.md) | Retrieval, indexing, env |
+| [docs/decision_log.md](docs/decision_log.md) | Decisions, incidents, deferrals |
+| [docs/agent-control-plane-architecture.md](docs/agent-control-plane-architecture.md) | MCP tools & contracts |
+| [docs/piv-002-observatory-ui.md](docs/piv-002-observatory-ui.md) | Observatory design |
+| [docs/hf_hub.md](docs/hf_hub.md) | Auspex-Aerie on Hugging Face |
+| [LICENSING.md](LICENSING.md) | Apache-2.0 boundary |
 
 ## License
 
-Curia is open source under the [Apache License 2.0](LICENSE). You may run, modify, distribute, and use it commercially under that license. Redistributors must provide the license, mark modified files, retain applicable source notices, and preserve the applicable attribution in [NOTICE](NOTICE). The license does not grant rights to Auspex Labs trade names, trademarks, service marks, or product names beyond customary attribution.
-
-See [LICENSING.md](LICENSING.md) for the source-tree and repository-history boundary.
+[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) and [LICENSING.md](LICENSING.md). No grant of Auspex Labs trademarks beyond customary attribution.
 
 ## Acknowledgments
 
-Thanks to [Andrej Karpathy](https://github.com/karpathy) for publishing [llm-council](https://github.com/karpathy/llm-council) and popularizing the answer → anonymous peer review → chairman synthesis pattern that inspired Curia.
-
-Contributions and feedback are welcome under the license terms above.
+Thanks to [Andrej Karpathy](https://github.com/karpathy) for [llm-council](https://github.com/karpathy/llm-council) and popularizing answer → anonymous peer review → chair synthesis—the pattern Curia extends.
