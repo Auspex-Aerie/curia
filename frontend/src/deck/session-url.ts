@@ -2,7 +2,13 @@ import type { DeckState, DeckView, SettingsTab, WorkspaceView } from './types';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,160}$/;
 const DECK_VIEWS = new Set<DeckView>(['context', 'answers', 'rankings', 'verdict', 'quality']);
-const SETTINGS_TABS = new Set<SettingsTab>(['setup', 'squad', 'repository', 'appearance']);
+const SETTINGS_TABS = new Set<SettingsTab>([
+  'setup',
+  'squad',
+  'catalog',
+  'repository',
+  'appearance',
+]);
 
 export interface DeckLocation {
   page: WorkspaceView;
