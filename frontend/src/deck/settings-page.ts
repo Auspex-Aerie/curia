@@ -562,15 +562,14 @@ async function saveCatalogRow(container: HTMLElement, modelId: string): Promise<
   const row = container.querySelector(
     `[data-catalog-row="${CSS.escape(modelId)}"]`,
   ) as HTMLElement | null;
+  // Capture edited inputs *before* re-render destroys the form (Greptile P1).
   if (!row || catalogBusy) return;
+  const payload = rowPayload(row);
   catalogBusy = true;
   catalogMessage = '';
   catalogError = '';
   renderSettingsPage(container);
   try {
-    const payload = rowPayload(
-      container.querySelector(`[data-catalog-row="${CSS.escape(modelId)}"]`) as HTMLElement,
-    );
     const result = await api.catalogUpdateModel(modelId, payload);
     if (result.requires_restart !== false) markRestartRequired(true);
     if (result.entry && typeof result.entry === 'object') {
