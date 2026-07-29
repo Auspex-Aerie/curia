@@ -19,15 +19,17 @@ Needs Python 3.10+, [uv](https://docs.astral.sh/uv/), Node.js/npm, [OpenRouter](
 
 ```bash
 uv sync
-cd frontend && npm install && cd ..   # Vite + UI deps live only here (not via uv, not repo root)
+cd frontend && npm install && cd ..   # first time only; start.sh also installs if vite is missing
 cp .env.example .env   # OPENROUTER_API_KEY=...
-./start.sh
+./start.sh             # kills stale Curia on :8001/:5173, resets env, starts API + Observatory
 ```
 
-`uv` installs Python only. Observatory packages (`vite`, `marked`, `dompurify`, `highlight.js`, …) come from **`frontend/package.json`** — always run `npm install` inside `frontend/`. Do not `npm install vite` at the repo root (there is no root package). Avoid `NODE_ENV=production` / `npm install --omit=dev` for local setup; the app needs the full frontend install to run `npm run dev`.
+`./start.sh` is the supported local UX: free Curia ports, unset stale `VITE_API_*`, wait for API health, then Vite with a same-origin `/api` proxy (WSL-friendly). Defaults bind **127.0.0.1** (local app). Overrides: `CURIA_API_PORT`, `CURIA_WEB_PORT`, `CURIA_API_HOST`, `CURIA_WEB_HOST` (e.g. `0.0.0.0` for LAN), `CURIA_SKIP_KILL=1`, `CURIA_SKIP_INSTALL=1`.
 
-- Observatory: [http://127.0.0.1:5173](http://127.0.0.1:5173) (dev proxies browser `/api` → backend; good for WSL)  
-- API: `http://127.0.0.1:8001` (`CURIA_API_HOST` / `CURIA_API_PORT` / `CURIA_WEB_HOST` override)
+`uv` installs Python only. Observatory packages live under **`frontend/`** — never `npm install vite` at the repo root.
+
+- Observatory: [http://127.0.0.1:5173](http://127.0.0.1:5173) — browser **relative** `/api` → Vite → API  
+- API: `http://127.0.0.1:8001` (curl/MCP; browser should not need this host for settings)
 
 **First grounded run:** prefetch retrieval models (HuggingFace Hub, not Git LFS), then index a repo (settings `repo_root` or MCP reindex).
 
