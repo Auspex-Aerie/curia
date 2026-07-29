@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Curia local launcher — one command, clean slate.
 # Starts API (:8001) + Observatory (:5173) with a WSL-safe Vite /api proxy.
+# Ctrl+C / SIGTERM stops the whole stack (uv + uvicorn + npm + vite), not just wait.
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,22 +13,21 @@ cd "$ROOT_DIR"
 API_PORT="${CURIA_API_PORT:-8001}"
 WEB_PORT="${CURIA_WEB_PORT:-5173}"
 API_HOST="${CURIA_API_HOST:-127.0.0.1}"
-# Loopback by default (local app). WSL Windows browsers still use
-# http://127.0.0.1:WEB_PORT via localhost forwarding. LAN bind is opt-in:
-#   CURIA_WEB_HOST=0.0.0.0 ./start.sh
+# Loopback by default (local app). LAN bind is opt-in: CURIA_WEB_HOST=0.0.0.0
 WEB_HOST="${CURIA_WEB_HOST:-127.0.0.1}"
 SKIP_KILL="${CURIA_SKIP_KILL:-0}"
 SKIP_INSTALL="${CURIA_SKIP_INSTALL:-0}"
+# Cold import (torch/RAG) can exceed a few seconds on WSL first start.
+API_READY_SECS="${CURIA_API_READY_SECS:-90}"
+API_LOG="${CURIA_API_LOG:-${TMPDIR:-/tmp}/curia-api-$$.log}"
+WEB_LOG="${CURIA_WEB_LOG:-${TMPDIR:-/tmp}/curia-web-$$.log}"
 
-# Host used by curl readiness + Vite proxy (must reach the API from this process).
-# When uvicorn binds 0.0.0.0/::, loopback still works; otherwise use the bind host.
 if [[ "${API_HOST}" == "0.0.0.0" || "${API_HOST}" == "::" || "${API_HOST}" == "[::]" ]]; then
   API_REACH="127.0.0.1"
 else
   API_REACH="${API_HOST}"
 fi
 
-# http://host:port — IPv6 literals need brackets (::1 → [::1]).
 http_host() {
   local h="$1"
   if [[ "${h}" == \[* ]]; then
@@ -55,7 +55,25 @@ info() { printf '  → %s\n' "$*"; }
 warn() { printf '  ! %s\n' "$*" >&2; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-# PIDs listening on a TCP port (Linux/WSL). Best-effort; no-op if ss/lsof missing.
+# Prefer project tools; pick up uv when installer left it off PATH (common on WSL/root).
+ensure_uv_on_path() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+  local candidate
+  for candidate in \
+    "${HOME}/.local/bin/uv" \
+    "/root/.local/bin/uv" \
+    "${HOME}/.cargo/bin/uv"; do
+    if [[ -x "${candidate}" ]]; then
+      export PATH="$(dirname "${candidate}"):${PATH}"
+      info "added $(dirname "${candidate}") to PATH (uv was not on PATH)"
+      return 0
+    fi
+  done
+  return 1
+}
+
 pids_on_port() {
   local port="$1"
   local pids=""
@@ -74,7 +92,20 @@ pids_on_port() {
   printf '%s\n' "${pids}"
 }
 
-# Kill processes we own that look like a previous Curia stack for this tree/ports.
+# Kill a PID and its descendants (uv → uvicorn, npm → vite).
+kill_tree() {
+  local pid="$1"
+  local sig="${2:-TERM}"
+  local child
+  [[ -z "${pid}" ]] && return 0
+  if command -v pgrep >/dev/null 2>&1; then
+    for child in $(pgrep -P "${pid}" 2>/dev/null || true); do
+      kill_tree "${child}" "${sig}"
+    done
+  fi
+  kill "-${sig}" "${pid}" 2>/dev/null || true
+}
+
 stop_stale_curia() {
   local port pid cmd
   say "Stopping anything already on Curia ports (${API_PORT}, ${WEB_PORT})…"
@@ -83,16 +114,15 @@ stop_stale_curia() {
     while read -r pid; do
       [[ -z "${pid}" ]] && continue
       cmd="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
-      # Only kill if it looks like our stack (avoid random services on same port).
       if [[ "${cmd}" == *uvicorn*backend.main* ]] \
         || [[ "${cmd}" == *uvicorn*"backend.main:app"* ]] \
         || [[ "${cmd}" == *vite* ]] \
         || [[ "${cmd}" == *"npm run dev"* ]] \
         || [[ "${cmd}" == *"${ROOT_DIR}"* ]]; then
         info "killing pid ${pid} on :${port}  (${cmd:0:80})"
-        kill "${pid}" 2>/dev/null || true
+        kill_tree "${pid}" TERM
         sleep 0.15
-        kill -9 "${pid}" 2>/dev/null || true
+        kill_tree "${pid}" KILL
       else
         warn "port :${port} held by pid ${pid} (not clearly Curia): ${cmd:0:80}"
         warn "set CURIA_SKIP_KILL=1 to leave it, or free the port yourself"
@@ -100,23 +130,23 @@ stop_stale_curia() {
     done < <(pids_on_port "${port}")
   done
 
-  # Orphans matching this checkout (no longer bound, or ss missed them).
   if command -v pgrep >/dev/null 2>&1; then
     local p
     for p in $(pgrep -f "uvicorn backend.main:app" 2>/dev/null || true); do
       cmd="$(ps -p "${p}" -o args= 2>/dev/null || true)"
       if [[ "${cmd}" == *"${ROOT_DIR}"* ]] || [[ "${cmd}" == *uvicorn*backend.main* ]]; then
         info "killing leftover uvicorn pid ${p}"
-        kill "${p}" 2>/dev/null || true
+        kill_tree "${p}" TERM
+        kill_tree "${p}" KILL
       fi
     done
-    # Vite started from this repo's frontend/
     for p in $(pgrep -f "vite" 2>/dev/null || true); do
       cmd="$(ps -p "${p}" -o args= 2>/dev/null || true)"
       cwd="$(readlink -f "/proc/${p}/cwd" 2>/dev/null || true)"
       if [[ "${cwd}" == "${ROOT_DIR}/frontend"* ]] || [[ "${cmd}" == *"${ROOT_DIR}/frontend"* ]]; then
         info "killing leftover vite pid ${p}"
-        kill "${p}" 2>/dev/null || true
+        kill_tree "${p}" TERM
+        kill_tree "${p}" KILL
       fi
     done
   fi
@@ -126,13 +156,10 @@ stop_stale_curia() {
 
 reset_env() {
   say "Resetting browser/API env for a clean proxy path…"
-  # Stale values re-break WSL (browser tries :8001 → CONN_REFUSED).
   unset VITE_API_BASE || true
   unset VITE_API_DIRECT || true
   unset VITE_API_PROXY_TARGET || true
-  # Proxy/readiness must match where *this process* can reach the API.
   export CURIA_API_PROXY_TARGET="${API_REACH_URL}"
-  # Do not force NODE_ENV=production (would historically omit vite from npm).
   if [[ "${NODE_ENV:-}" == "production" ]]; then
     warn "NODE_ENV=production is set; unsetting for local Observatory install/run"
     unset NODE_ENV || true
@@ -142,7 +169,10 @@ reset_env() {
 
 check_tooling() {
   say "Checking tools…"
-  command -v uv >/dev/null 2>&1 || die "uv not found — install https://docs.astral.sh/uv/"
+  if ! ensure_uv_on_path; then
+    die "uv not found — install https://docs.astral.sh/uv/ then: export PATH=\"\$HOME/.local/bin:\$PATH\""
+  fi
+  info "uv: $(command -v uv)"
   command -v npm >/dev/null 2>&1 || die "npm not found — install Node.js inside this environment (WSL Ubuntu, not Windows)"
   command -v curl >/dev/null 2>&1 || die "curl not found — needed for readiness checks"
 
@@ -151,7 +181,7 @@ check_tooling() {
   info "node: ${node_path:-missing}"
   if is_wsl && [[ -n "${node_path}" ]]; then
     case "${node_path}" in
-      /mnt/c/*| /mnt/d/*| /mnt/e/*)
+      /mnt/c/* | /mnt/d/* | /mnt/e/*)
         die "node is a Windows path (${node_path}). Install Node inside WSL (e.g. apt/nvm) and re-open the shell."
         ;;
     esac
@@ -176,16 +206,54 @@ ensure_frontend_deps() {
 }
 
 declare -a CURIA_PIDS=()
+CLEANED=0
 
-stop_children() {
+# Tear down the whole stack. Background jobs ignore keyboard SIGINT; we must kill them.
+cleanup_stack() {
+  if [[ "${CLEANED}" -eq 1 ]]; then
+    return 0
+  fi
+  CLEANED=1
+  trap - EXIT INT TERM HUP
+
+  say ""
+  say "Stopping Curia (API + Observatory)…"
   local pid
   for pid in "${CURIA_PIDS[@]:-}"; do
-    kill "${pid}" 2>/dev/null || true
+    kill_tree "${pid}" TERM
   done
-  wait "${CURIA_PIDS[@]:-}" 2>/dev/null || true
+  sleep 0.4
+  for pid in "${CURIA_PIDS[@]:-}"; do
+    kill_tree "${pid}" KILL
+  done
+  # Best-effort free of Curia ports so the next ./start.sh does not need a new terminal.
+  if [[ "${SKIP_KILL}" != "1" ]]; then
+    local port p
+    for port in "${API_PORT}" "${WEB_PORT}"; do
+      while read -r p; do
+        [[ -z "${p}" ]] && continue
+        kill_tree "${p}" TERM
+        kill_tree "${p}" KILL
+      done < <(pids_on_port "${port}")
+    done
+  fi
+  info "stopped — this shell is free again (no new CLI needed)"
 }
 
-trap stop_children EXIT INT TERM
+trap cleanup_stack EXIT
+trap 'cleanup_stack; exit 130' INT
+trap 'cleanup_stack; exit 143' TERM
+trap 'cleanup_stack; exit 129' HUP
+
+dump_log_tail() {
+  local file="$1"
+  local label="$2"
+  if [[ -f "${file}" ]] && [[ -s "${file}" ]]; then
+    say ""
+    warn "Last lines of ${label} (${file}):"
+    tail -n 40 "${file}" >&2 || true
+  fi
+}
 
 # -----------------------------------------------------------------------------
 # Main
@@ -207,53 +275,71 @@ fi
 
 ensure_frontend_deps
 
-say "Starting API on ${API_HOST}:${API_PORT} (probe ${API_REACH})…"
-uv run uvicorn backend.main:app --host "${API_HOST}" --port "${API_PORT}" &
+say "Starting API on ${API_HOST}:${API_PORT} (probe ${API_REACH_URL}, up to ${API_READY_SECS}s)…"
+info "API log: ${API_LOG}"
+# New process group so we can signal the whole uv→uvicorn tree if needed.
+set +m
+(
+  cd "${ROOT_DIR}"
+  exec uv run uvicorn backend.main:app --host "${API_HOST}" --port "${API_PORT}"
+) >"${API_LOG}" 2>&1 &
 CURIA_PIDS+=("$!")
 
 API_READY=0
-for _ in $(seq 1 60); do
-  if curl -sf "http://${API_REACH}:${API_PORT}/" >/dev/null 2>&1; then
+elapsed=0
+while [[ "${elapsed}" -lt "${API_READY_SECS}" ]]; do
+  if curl -sf "${API_REACH_URL}/" >/dev/null 2>&1; then
     API_READY=1
     break
   fi
   if ! kill -0 "${CURIA_PIDS[0]}" 2>/dev/null; then
-    die "API process exited before becoming ready (see uvicorn output above)"
+    dump_log_tail "${API_LOG}" "API"
+    die "API process exited before becoming ready. Common fixes: uv sync (from repo root), OPENROUTER not required for boot, check log above."
   fi
-  sleep 0.1
+  # Heartbeat every ~5s so long cold starts do not look hung.
+  if (( elapsed > 0 && elapsed % 5 == 0 )); then
+    info "still waiting for API… ${elapsed}s / ${API_READY_SECS}s"
+  fi
+  sleep 1
+  elapsed=$((elapsed + 1))
 done
-[[ "${API_READY}" -eq 1 ]] || die "API not ready on http://${API_REACH}:${API_PORT}/ within ~6s"
-info "API ready  (curl http://${API_REACH}:${API_PORT}/ → OK)"
+if [[ "${API_READY}" -ne 1 ]]; then
+  dump_log_tail "${API_LOG}" "API"
+  die "API not ready on ${API_REACH_URL}/ within ${API_READY_SECS}s (raise CURIA_API_READY_SECS if cold start is slow)."
+fi
+info "API ready  (curl ${API_REACH_URL}/ → OK)"
 
 say "Starting Observatory (Vite) on ${WEB_HOST}:${WEB_PORT}…"
 info "browser uses relative /api → Vite proxies to ${CURIA_API_PROXY_TARGET}"
+info "WEB log: ${WEB_LOG}"
 if [[ "${WEB_HOST}" != "127.0.0.1" && "${WEB_HOST}" != "localhost" ]]; then
-  warn "WEB_HOST=${WEB_HOST} is not loopback — local-dev proxy is reachable on that bind (CURIA_WEB_HOST=127.0.0.1 is the default)."
+  warn "WEB_HOST=${WEB_HOST} is not loopback — opt-in LAN bind (default is 127.0.0.1)."
 fi
 (
   cd "${ROOT_DIR}/frontend"
-  # Subshell inherits cleaned env; do not reintroduce VITE_API_BASE.
   unset VITE_API_BASE VITE_API_DIRECT
   export CURIA_API_PROXY_TARGET
-  # strictPort: fail if WEB_PORT is taken so the banner never lies about the URL.
   exec npm run dev -- --host "${WEB_HOST}" --port "${WEB_PORT}" --strictPort
-) &
+) >"${WEB_LOG}" 2>&1 &
 CURIA_PIDS+=("$!")
 
-# Brief wait so Vite can bind; fail if port in use (strictPort) or process dies.
 WEB_READY=0
-for _ in $(seq 1 40); do
+for _ in $(seq 1 60); do
   if curl -sf "http://127.0.0.1:${WEB_PORT}/" >/dev/null 2>&1 \
-    || curl -sf "http://${WEB_HOST}:${WEB_PORT}/" >/dev/null 2>&1; then
+    || curl -sf "http://$(http_host "${WEB_HOST}"):${WEB_PORT}/" >/dev/null 2>&1; then
     WEB_READY=1
     break
   fi
   if ! kill -0 "${CURIA_PIDS[1]}" 2>/dev/null; then
-    die "Observatory exited early — is :${WEB_PORT} free? (Vite strictPort; re-run without CURIA_SKIP_KILL or free the port)"
+    dump_log_tail "${WEB_LOG}" "Observatory"
+    die "Observatory exited early — is :${WEB_PORT} free? (strictPort)"
   fi
-  sleep 0.15
+  sleep 0.25
 done
-[[ "${WEB_READY}" -eq 1 ]] || die "Observatory not accepting on :${WEB_PORT} within a few seconds"
+if [[ "${WEB_READY}" -ne 1 ]]; then
+  dump_log_tail "${WEB_LOG}" "Observatory"
+  die "Observatory not accepting on :${WEB_PORT} within ~15s"
+fi
 
 say ""
 say "────────────────────────────────────────────────────────────"
@@ -262,17 +348,41 @@ say "    http://127.0.0.1:${WEB_PORT}/"
 say "    http://127.0.0.1:${WEB_PORT}/?page=settings"
 say ""
 say "  API (curl / MCP — browser /api stays on :${WEB_PORT} via Vite proxy):"
-say "    http://${API_REACH}:${API_PORT}/"
+say "    ${API_REACH_URL}/"
+say ""
+say "  Logs:  API → ${API_LOG}"
+say "         WEB → ${WEB_LOG}"
 say ""
 if is_wsl; then
   say "  WSL tips:"
-  say "    • Windows browser: http://127.0.0.1:${WEB_PORT} (localhost forward)"
+  say "    • Windows browser: http://127.0.0.1:${WEB_PORT}"
   say "    • Network tab: /api/* on :${WEB_PORT}, not :${API_PORT}"
-  say "    • LAN bind only if needed: CURIA_WEB_HOST=0.0.0.0 ./start.sh"
+  say "    • Ctrl+C here stops API + Vite (same terminal)"
 fi
-say "  Ctrl+C stops both processes."
+say "  Ctrl+C stops both processes and returns this shell."
 say "────────────────────────────────────────────────────────────"
 say ""
 
-# API is primary; if it dies, EXIT trap tears down Vite.
-wait "${CURIA_PIDS[0]}"
+# Wait for either child; always cleanup via trap so Ctrl+C frees the terminal.
+wait_fail=0
+while true; do
+  if ! kill -0 "${CURIA_PIDS[0]}" 2>/dev/null; then
+    warn "API process exited"
+    wait_fail=1
+    break
+  fi
+  if ! kill -0 "${CURIA_PIDS[1]}" 2>/dev/null; then
+    warn "Observatory process exited"
+    dump_log_tail "${WEB_LOG}" "Observatory"
+    wait_fail=1
+    break
+  fi
+  # wait -n not on macOS bash 3.2; poll instead.
+  sleep 0.5
+done
+
+if [[ "${wait_fail}" -eq 1 ]]; then
+  dump_log_tail "${API_LOG}" "API"
+  EXIT_CODE=1
+  cleanup 1
+fi
