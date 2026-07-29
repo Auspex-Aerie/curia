@@ -17,6 +17,21 @@ Independently implemented by Auspex Labs; inspired by Andrej Karpathy’s [llm-c
 
 Needs Python 3.10+, [uv](https://docs.astral.sh/uv/), Node.js/npm, [OpenRouter](https://openrouter.ai/) API key.
 
+### Windows / WSL (read before `uv sync`)
+
+See active deferral **[DEF-015](docs/decision_log.md#def-015-defer-non-root-wsl-install-path-and-tool-path-enforcement)** (non-root install + PATH enforcement still being worked).
+
+- Run install and `./start.sh` **inside Ubuntu/WSL**, not PowerShell. Open the UI from a Windows browser at `http://127.0.0.1:5173`.
+- Prefer a **normal WSL user** and a clone on the Linux filesystem (`~/curia`). Avoid daily-driver **root** (`sudo su`) when you can — root puts tools under `/root/...` and makes home/`/mnt/c` ownership painful.
+- **Current dogfood note:** some WSL setups are still running as **root** while permissions are sorted; that is temporary (DEF-015), not the long-term target.
+- **`uv` PATH first:** the official installer does not always put `uv` on `PATH` for the next shell. After install it often lives at:
+  - normal user: `~/.local/bin/uv` → e.g. `/home/<you>/.local/bin/uv`
+  - root: `/root/.local/bin/uv`  
+  Before the commands below: `export PATH="$HOME/.local/bin:$PATH"` (or `source "$HOME/.local/bin/env"` if present). Put that line in `~/.bashrc` (for root: `/root/.bashrc`). Confirm with `which uv`.
+- Use **Linux** Node/npm in WSL (`which node` must not be under `/mnt/c/...`).
+
+### Install and run
+
 ```bash
 uv sync
 cd frontend && npm install && cd ..   # first time only; start.sh also installs if vite is missing
