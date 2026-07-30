@@ -51,11 +51,23 @@ cp .env.example .env   # OPENROUTER_API_KEY=...
 **First grounded run:** prefetch retrieval models (HuggingFace Hub, not Git LFS), then index a repo (settings `repo_root` or MCP reindex).
 
 ```bash
+# Recommended: free HF read token for better Hub rate limits (public models work without it)
+export HF_TOKEN=hf_...   # https://huggingface.co/settings/tokens
+
 uv run curia-prefetch-rag
+# optional isolated cache:
+# CURIA_HF_HOME=~/.cache/curia-hf uv run curia-prefetch-rag --cache-dir ~/.cache/curia-hf
 ```
 
-Optional: `CURIA_HF_HOME=~/.cache/curia-hf uv run curia-prefetch-rag --cache-dir ~/.cache/curia-hf`  
-Pip install and bi-encoder/LM Studio path: [RAG_LMSTUDIO.md](RAG_LMSTUDIO.md).
+What that pulls (approx.; already-cached files are skipped):
+
+| Role | Hub id | ~download |
+|------|--------|-----------|
+| ColBERT | `colbert-ir/colbertv2.0` | ~400–500 MB |
+| Rerank | `jinaai/jina-reranker-v3` | ~1.0–1.3 GB |
+| Router embed | `sentence-transformers/all-MiniLM-L6-v2` | ~80–100 MB |
+
+**PyTorch** (~1.5–2+ GB) is installed by `uv sync`, not by this CLI. A future thinner stack may shrink that import; today CodeRAG still needs a full torch wheel. The CLI prints per-model start/end lines (long quiet stretches usually mean a multi-GB transfer is in flight). Auspex recipe card: [curia-grounding-config](https://huggingface.co/auspex-aerie/curia-grounding-config). Full env notes: [RAG_LMSTUDIO.md](RAG_LMSTUDIO.md).
 
 ---
 
