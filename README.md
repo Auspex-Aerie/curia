@@ -1,5 +1,7 @@
 # Curia
 
+[![Greptile: The War on Bugs](https://www.greptile.com/badge.svg)](https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source)
+
 *Latin: the chamber where deliberation happens.*
 
 **Your coding agent only gets one context window and one training distribution.**  
