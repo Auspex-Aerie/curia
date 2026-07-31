@@ -106,12 +106,12 @@ def harvest_file(path: Path, project: str) -> List[Dict[str, Any]]:
         role = _message_role(obj)
         parts = _content_parts(obj)
         if role == "user":
-            close()
             text = _user_text(parts)
-            # tool_result-only user wrappers — skip empty
+            # Tool-result wrappers often arrive as role=user with no text.
+            # Do NOT close the active episode or later assistant tool_use is orphaned.
             if not text:
-                # sometimes user row only carries tool_result
                 continue
+            close()
             current = {
                 "ask": text[:4000],
                 "tools": [],

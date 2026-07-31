@@ -24,7 +24,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: Unit tests
-        run: uv run pytest tests/unit -q -m "not eval"
+        run: uv run pytest tests/unit RAGRouter/Training/tests -q -m "not eval"
 
   frontend:
     runs-on: ubuntu-latest

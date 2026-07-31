@@ -95,9 +95,11 @@ def categorize_openrouter(row: Dict[str, Any], model: str) -> Dict[str, str]:
 
 
 def categorize_claude_p(row: Dict[str, Any]) -> Dict[str, str]:
+    """Run `claude -p` with the prompt on stdin (not argv — avoids process-list leaks)."""
     prompt = SYSTEM + "\n\n" + _build_user(row)
     proc = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "text"],
+        ["claude", "-p", "--output-format", "text"],
+        input=prompt,
         capture_output=True,
         text=True,
         timeout=180,

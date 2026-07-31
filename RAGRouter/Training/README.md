@@ -42,6 +42,14 @@ uv run python RAGRouter/Training/scripts/llm_categorize.py \
 Curate accepted rows into `backend/rag/router_training.json` (or a staging file)
 before any SupCon/CE train.
 
+## Tests
+
+```bash
+uv run pytest RAGRouter/Training/tests -q
+```
+
+Included in CI (`pytest tests/unit RAGRouter/Training/tests`).
+
 ## Categories (same as production)
 
 See `backend/rag/query_router.py` → `ROUTER_CATEGORIES` and `route_from_category`.
