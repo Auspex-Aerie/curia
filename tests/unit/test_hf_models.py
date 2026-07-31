@@ -1,6 +1,12 @@
 """HuggingFace RAG model registry (no network in unit tests)."""
 
-from backend.rag.hf_models import configure_hf_cache, rag_model_specs
+from backend.rag.hf_models import (
+    SIZE_HINTS,
+    TORCH_SIZE_HINT,
+    configure_hf_cache,
+    hf_token_present,
+    rag_model_specs,
+)
 
 
 def test_rag_model_specs_include_core_roles():
@@ -10,6 +16,17 @@ def test_rag_model_specs_include_core_roles():
     by_role = {s.role: s for s in specs}
     assert "colbert" in by_role["colbert"].model_id or "/" in by_role["colbert"].model_id
     assert by_role["rerank"].kind in {"transformers", "sentence_transformers"}
+    for spec in specs:
+        assert spec.size_hint
+        assert spec.role in SIZE_HINTS
+    assert "GB" in TORCH_SIZE_HINT
+
+
+def test_hf_token_present_reads_env(monkeypatch):
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    monkeypatch.setenv("HF_TOKEN", "hf_test_not_real")
+    assert hf_token_present() is True
 
 
 def test_configure_hf_cache_sets_env(tmp_path, monkeypatch):

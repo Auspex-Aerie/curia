@@ -46,13 +46,16 @@ ColBERT (default) and Jina/BGE rerank run locally via `pylate` and `sentence-tra
 
 ### Prefetch retrieval models (recommended)
 
+Public Hub models work **without** a token, but a **free HF read token** is strongly recommended for rate limits:
+
 ```bash
+export HF_TOKEN=hf_...   # https://huggingface.co/settings/tokens
 uv run curia-prefetch-rag
 # or with an isolated cache:
 uv run curia-prefetch-rag --cache-dir ~/.cache/curia-hf
 ```
 
-Pulls ColBERT, the cross-encoder reranker, and the router embedder into the HF cache so the first grounded deliberation does not block on multi-GB downloads.
+Pulls ColBERT (~400–500 MB), Jina reranker (~1.0–1.3 GB), and MiniLM router embed (~80–100 MB) into the HF cache so the first grounded deliberation does not block on multi-GB downloads. The CLI prints per-model start/end progress; PyTorch (~1.5–2+ GB) comes from `uv sync`, not this command.
 
 ### Fusion, graph, routing
 - `QUERY_ROUTER` (default `embedding`) — `embedding` | `regex`
