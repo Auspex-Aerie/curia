@@ -22,6 +22,10 @@ temp_repos/
 logs/
 *.log
 
+# RAGRouter training harvest (local only; keep .gitkeep)
+RAGRouter/Training/data/*
+!RAGRouter/Training/data/.gitkeep
+
 # Frontend dependencies and generated output
 frontend/node_modules/
 frontend/dist/
