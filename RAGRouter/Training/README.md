@@ -7,6 +7,9 @@ Runtime router today: frozen MiniLM + centroids from
 `backend/rag/router_training.json` (~24 seeds). This folder is **not** on the
 serving path; it only produces candidate labels for human curation.
 
+**Full recipe for external review:** [docs/PLAN.md](docs/PLAN.md)  
+(sources, storage, compression/index, privacy, train gates, current vs future arch).
+
 ## Layout
 
 | Path | Role |
