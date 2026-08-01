@@ -522,3 +522,87 @@ incidents* — not tasks (those live in `PLAN.md` / issue trackers).
 - **date:** 2026-07-29 · **status:** active · **triggered_by:** Windows WSL first-run dogfood; root shell used to dodge venv/home permission issues on `/mnt/c`; `uv` installed under `/root/.local/bin` and missing from PATH · **docs_updated:** `docs/decision_log.md`, `README.md` · **related:** `DEF-014`, `DEC-034`
 - **decision:** Defer a polished **non-root** Windows/WSL installer path and automated PATH enforcement for `uv` / Node. Interim: document that the current WSL dogfood often runs as **root** (`sudo su`) while permissions and layout are worked through; operators must ensure `uv` is on `PATH` (commonly `$HOME/.local/bin` or `/root/.local/bin` after the official installer). Prefer a normal WSL user + Linux-filesystem clone (`~/curia`) over root + `/mnt/c/...` when practical. `./start.sh` remains the supported launcher once tools resolve.
 - **revisit_when:** (a) a non-root WSL user can `uv sync` + `npm install` + `./start.sh` without ownership fights on the project tree, **or** (b) first-run packaging needs automatic PATH / tool discovery beyond a README note.
+
+### DIS-004: HYP-002 router accuracy is resubstitution, not generalization
+- **date:** 2026-08-01 · **status:** observed · **triggered_by:** external review of `RAGRouter/Training/docs/PLAN.md`; programmatic set equality check · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` · **related:** `HYP-002`, `DEC-011`, `INC-008`, `HYP-003`
+- **finding:** `backend/rag/router_training.json` (24 rows) is an **exact set equality** with HYP-002 golden (18) + architectural probes (6). `eval_hyp002.py` builds embedding-router prototypes from golden+probes then scores the same golden set. Embedding arm accuracy is **resubstitution**; regex arm is the only zero-shot comparison. The headline “0.333 → 0.833” router accuracy that fed `DEC-011` therefore carries **no information about unseen queries**. Separately, centroid prototypes fail to fully separate their own train points (review: 15/18).
+- **implication:** Do not treat HYP-002 router accuracy as evidence of generalization. Do not grow labels or train against the same 24 rows as a holdout. Re-measure under `HYP-003` on a zero-overlap eval set. `DEC-011` production default may still be correct — it must survive on honest evidence.
+
+### DIS-005: answer_slot_purity is circular when graph append is off
+- **date:** 2026-08-01 · **status:** observed · **triggered_by:** external review of PLAN + `eval_hyp002.py` / `retriever.py` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` · **related:** `HYP-002`, `DEC-011`, `INC-008`
+- **finding:** `answer_slot_purity` compares post-rerank-pre-graph vs full top-K. When `use_graph_append=False`, graph expansion is a no-op → purity is **1.0 by construction**. It re-reads the router’s graph-off decision as a quality score. Per-probe embedding scores of 0/1/1/1/1/1 (0.833) decode as “router labeled 5/6 training probes architectural,” not retrieval quality. (arch01 0.0 even graph-off is consistent with INC-002-era nondeterminism / other path effects, not purity semantics.)
+- **implication:** **Retire purity as a training/promotion gate.** Gate on recall/nDCG (or equivalent) with graph forced on vs off, scored through the **deployed** path.
+
+### DIS-006: Claude agent-chat harvest is wrong register for router labels (~0.3% usable)
+- **date:** 2026-08-01 · **status:** observed · **triggered_by:** external review measurement of local `candidates.jsonl` (n=5,832) · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` · **related:** `DEC-036`, `HYP-004`
+- **finding:** Median ask length ~1,749 chars (p90 ~3,434); 55% in 1.5–4k range; system markers 11.3%; duplicates 31.5%; 53% from one tokenjam scratchpad; `_looks_code_relevant` pass rate 99.7% (not a filter). Rows ≤200 chars **and** retrieval-query-shaped ≈ **18 (0.31%)**, mostly non-code-symbol. MiniLM `max_seq_length=256` truncates the majority of examples. Router↔browse agreement ~4.8% → Stage-B “disagreements first” is not triage. People ask agents to *fix/do*, not *where is X defined*.
+- **implication:** v1 volume is agent turns, not router gold. Use harvest for **OOD/negatives** and **(ask → files-read)** trails (`HYP-004`); expect tens of router labels; add synthetic short queries grounded in indexed symbols. Allowlist projects before any further mine. Pointer-only storage — never copy tool_result bodies.
+
+### INC-008: HYP-002 harness train-on-test, metric fudge, and undeployed path
+- **date:** 2026-08-01 · **status:** open · **triggered_by:** `DIS-004`, `DIS-005`; external review of `backend/rag/eval_hyp002.py` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` · **related:** `HYP-002`, `DEC-011`, `HYP-003`
+- **symptom:** Promotion metrics overstated embedding-router generalization and architectural “purity”; production path partially unmeasured.
+- **root_cause:** (1) Fit prototypes on golden+probes then score golden. (2) Undocumented `pattern`→`semantic` counted correct (`eval_hyp002.py` ~85–86). (3) Accuracy scored on bare `route_fn`, not `CodeRetriever._resolve_route` (≥2-path override). (4) Purity circular under graph-off (`DIS-005`).
+- **blast_radius:** `DEC-011` default rests partly on contaminated evidence; any train gate reusing purity/seed overlap would bless non-generalizing models. Governance: unlabeled scoring exceptions in promotion metrics.
+- **why_not_caught_earlier:** Small n=24 and identical train/eval fixtures were convenient; no separate holdout file; purity looked “improved” after graph-off memorization.
+- **planned_remediation:** `HYP-003` decontaminated eval; remove or explicitly document equivalence-class scoring as **3-way policy**; score `_resolve_route`; retire purity-as-gate; instrument production route (`DEC-036` step 0).
+
+### HYP-003: Honest re-measure of embedding vs regex router on zero-overlap holdout
+- **date:** 2026-08-01 · **status:** open · **triggered_by:** `DIS-004`, `INC-008`, `DEC-036` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` · **related:** `HYP-002`, `DEC-011`
+- **question:** On a short-query eval set with **zero row overlap** with `router_training.json`, does embedding-centroid (or logistic probe) beat regex on **3-way policy** accuracy and on retrieval recall/nDCG with graph forced on vs off, when scoring **`_resolve_route`**?
+- **observation:** Prior HYP-002 embedding win is resubstitution (`DIS-004`). Production still defaults to embedding (`DEC-011`).
+
+#### Candidate interventions
+| ID | Intervention | Mechanism | Predicted effect | Risk |
+|----|-------------|-----------|------------------|------|
+| H3a | Keep centroids; new holdout only | Measure status quo fairly | Know true gap vs regex | May show no win |
+| H3b | Logistic probe on frozen MiniLM + margin abstain | Linear policy + reject | Dominates centroids; OOD safe default | Needs ~O(10²) labels |
+| H3c | Regex-only production until H3a/H3b | Avoid false confidence | Simple baseline | May reintroduce arch pollution if regex weak |
+
+#### Test matrix
+| Run | Change | Notes |
+|-----|--------|-------|
+| 1 | H3a holdout | No train set change |
+| 2 | H3b if labels exist | k-fold CV; pre-register win Δ |
+| 3 | Downstream graph on/off | Independent of classification accuracy |
+
+#### Results
+_(pending)_
+
+### HYP-004: Behavioral (ask → files-read) pairs for rerank / index composition (DIS-001)
+- **date:** 2026-08-01 · **status:** open · **triggered_by:** `DIS-001`, `DIS-006`, external PLAN review · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` · **related:** `DEF-004`, `DEC-021`
+- **question:** Do allowlisted agent tool trails (paths actually Read/Grep’d after an ask) improve rerank or index hygiene vs current Jina-on-mixed-corpus behavior, under a pre-registered nDCG/recall gate?
+- **observation:** DIS-001 cleared graph pollution and named rerank+index as remaining precision risks. Agent harvest is poor for short intent labels but naturally yields ordered file evidence. Noisy positives and distribution shift still apply — separate gates from router work.
+
+#### Candidate interventions
+| ID | Intervention | Mechanism | Predicted effect | Risk |
+|----|-------------|-----------|------------------|------|
+| H4a | Relevance pairs from trails | Train/eval listwise or CE labels | Better source over docs/eval | Agent paths ≠ ideal answers |
+| H4b | Index exclude/downweight rules | Hygiene without train | Cheap win | Over-filtering |
+| H4c | Query-conditioned index filters | Runtime policy | Complements router | Scope creep |
+
+#### Test matrix
+| Run | Change | Notes |
+|-----|--------|-------|
+| 1 | Collect pointer-only trails under allowlist | Privacy-safe |
+| 2 | Offline nDCG with forced graph off | Isolate rerank |
+| 3 | Compare H4a vs H4b | Prefer cheaper win |
+
+#### Results
+_(pending)_
+
+### DEC-036: Reorient RAG router program — instrument, honest eval, 3-way policy, abstain before train
+- **date:** 2026-08-01 · **status:** accepted · **triggered_by:** external review of `RAGRouter/Training/docs/PLAN.md`; `DIS-004`, `DIS-005`, `DIS-006`, `INC-008` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md`, `RAGRouter/Training/README.md`, `RAGRouter/Training/docs/PIPELINE.md` · **related:** `DEC-011`, `DIS-001`, `HYP-003`, `HYP-004`, `DEF-016`
+- **decision:**
+  1. **Do not scale** label mining/train/publish on the pre-review PLAN ladder until foundational defects are addressed.
+  2. **Workstream order:** (0) instrument route (category, flags, top-2 cosine, margin) into retrieval event + Observatory; (1) decontaminated eval (`HYP-003`); (2) retire purity-as-gate; score `_resolve_route`; remove silent pattern↔semantic fudge or replace with explicit 3-way policy scoring; (3) train/gate on **3-way policy** (off / 1-hop / trace), keep 6 categories as recording vocabulary only; (4) add **abstain** (7th class or margin floor → safe default); (5) re-aim harvest — **allowlist**, **pointer-only** storage, filter/dedupe, synthetic short queries; (6) first model fit = **logistic probe on frozen MiniLM**, not LoRA/SupCon ladder; (7) Hub `curia-router` only under `DEF-016`.
+  3. Parallel: **HYP-004** for (ask → files-read) toward DIS-001.
+  4. Privacy: secrets via gitleaks **and** project consent allowlist; never copy tool_result bodies into the repo tree.
+  5. `DEC-011` remains production default until `HYP-003` says otherwise — not automatically reversed.
+- **rationale:** External review verified train-on-test leak and circular purity, and measured ~0.3% usable router rows in agent harvest. Scaling the old recipe would amplify uncertainty. Observability of the route is a prerequisite for any honest production feedback loop and matches DEC-025/028 posture.
+- **impact:** PLAN rewritten; train/publish deprioritized; mining re-scoped; new ledger HYPs for honest re-measure and DIS-001 trails. Implementation of step 0 (instrumentation) is the next code workstream.
+
+### DEF-016: Defer public Hub publish of `auspex-aerie/curia-router`
+- **date:** 2026-08-01 · **status:** active · **triggered_by:** `DEC-036`; PLAN modeling and consent review · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` · **related:** `DEC-033`, `DEC-032`, `HYP-003`
+- **decision:** Do not publish a trained `curia-router` (or equivalent) to Hugging Face for shelf-completeness. Config/labels mirrors already published may remain. Runtime may load a local logistic head / FT artifact without a public card.
+- **rationale:** No generalization evidence yet; data consent for any train corpus is unresolved; MiniLM full FT does not require a Hub adapter story. Public weights need a separate consent and eval review.
+- **revisit_when:** (a) `HYP-003` shows a clear held-out win with pre-registered effect size, **and** (b) train corpus is allowlisted/public-safe, **and** (c) explicit product decision to publish weights.

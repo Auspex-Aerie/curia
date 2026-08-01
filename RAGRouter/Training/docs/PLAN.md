@@ -1,69 +1,222 @@
 # RAG Router Training Plan
 
-**Status:** draft for external review  
+**Status:** revised after external review (2026-08-01)  
 **Date:** 2026-08-01  
 **Owner:** Curia / Auspex-Aerie  
 **Code home:** `RAGRouter/Training/` (offline; not on the serving path)  
 **Runtime router:** `backend/rag/query_router.py`  
-**Related:** HYP-002, DEC-010, DEC-011, `docs/hf_hub.md`, `backend/rag/router_training.json`
+**Related ledger:** `DIS-004`–`DIS-006`, `INC-008`, `DEC-036`, `DEF-016`, `HYP-003`, `HYP-004`  
+**Also:** HYP-002, DEC-010, DEC-011, DIS-001, `docs/hf_hub.md`, `backend/rag/router_training.json`
 
-This document is the **full recipe**: what we route, where data comes from, how we store it, how we train, current vs future architecture, and what we will *not* do. Implementation details that already exist are marked **(shipped)**; planned work is **(planned)**.
+This document is the **full recipe** for external review. It absorbs a 2026-08-01
+read-only review that verified load-bearing defects in the evidence behind the
+current production default and measured the proposed harvest source. **Shipped**
+vs **planned** is marked explicitly. Sections that reverse earlier draft claims
+are called out.
+
+---
+
+## 0. Verdict (external review absorbed)
+
+The prior draft was a **scaling plan on cracked foundations**. Scaling as
+originally written would produce a larger, better-documented version of the same
+uncertainty. The program is **re-ordered**: instrument and decontaminate
+evidence first; harvest only under allowlist + pointer-only storage; train only
+after honest gates; treat Hub publish as a separate consent decision.
+
+Three cracks (two programmatically verified, one measured on real harvest):
+
+1. **Train-on-test leak** — production seed labels ≡ HYP-002 eval set (exact set equality, n=24).  
+2. **Circular purity metric** — `answer_slot_purity` is 1.0 by construction when graph is off.  
+3. **Source property** — Claude agent turns are not short code-retrieval queries; usable yield ≈ **0.3%** of the Stage-B dump.
 
 ---
 
 ## 1. Problem
 
-CodeRAG must choose a **retrieval policy per user query** (especially whether to expand the code graph). Wrong policy either:
+CodeRAG must choose a **retrieval policy per user query** (especially whether to
+expand the code graph). Wrong policy either:
 
-- **pollutes** context with graph neighbors on overview/architecture questions, or  
+- **pollutes** context with graph neighbors on overview-style questions, or  
 - **misses** cross-file / call-chain context on trace-style questions.
 
-Today the production default is a **lightweight embedding router** (DEC-011): frozen MiniLM + class centroids from **~24 hand labels**. That beat regex on a small eval (HYP-002) but will not scale without more labeled **coding-agent** asks and, eventually, a real trained model.
+**Blast radius is bounded (DEC-010):** graph neighbors fill ≤10 slots *after*
+answer slots and never re-sort. A wrong route costs ≤10 tail chunks, not
+wrong answers. That bounds how much modeling effort is justified.
 
-**Goal of this program:** grow a clean, privacy-aware training set from real agent telemetry, then train and optionally publish a small **Curia-owned** router model (`auspex-aerie/curia-router`), without poisoning production on noisy chat logs.
+Today the production default is a **lightweight embedding router** (DEC-011):
+frozen MiniLM + class centroids from **~24 hand labels**. That promotion rested
+on HYP-002 numbers that do **not** measure generalization (see §2). Goal of this
+program is therefore **not** “grow labels and train ASAP,” but:
 
----
-
-## 2. What we route (scope)
-
-### 2.1 In scope
-
-| Concept | Definition |
-|---------|------------|
-| **Input** | Natural-language **user ask** (coding-agent style) |
-| **Output** | One of 6 **intent categories** |
-| **Effect** | Maps to `QueryRoute`: `use_graph_append`, `graph_trace`, `graph_seed_k` |
-
-Categories (locked to production — `ROUTER_CATEGORIES`):
-
-| Category | Retrieval effect (today) |
-|----------|---------------------------|
-| `symbol_lookup` | No graph — narrow definition / “where is X” |
-| `trace` | Graph + trace-style expansion |
-| `cross_file` | Graph, not full call-chain trace |
-| `semantic` | Graph, soft semantic expansion |
-| `pattern` | Graph; queues/handlers/middleware-style |
-| `architectural` | No graph — overview / pipeline / system design |
-
-This is **not**:
-
-- which deliberation mode or LLM to use  
-- which files to return as the final answer (that is ColBERT + RRF + rerank)  
-- agent planning / next-tool prediction as a product requirement (optional future use of the same harvest)
-
-### 2.2 Out of scope (this program)
-
-- Fine-tuning ColBERT or Jina reranker  
-- Re-hosting upstream multi-GB weights on Auspex HF  
-- Training on unfiltered chat noise or unredacted secrets  
-- Shipping a trained model before class balance and holdout metrics exist  
+1. Make the route **auditable** in production.  
+2. Re-measure router policy on an **uncontaminated** eval.  
+3. Only then grow labels / fit a better probe if evidence warrants it.  
+4. Point high-value harvest energy at **(ask → files read)** for DIS-001
+   (rerank / index composition), not only at 6-way intent labels.
 
 ---
 
-## 3. Current architecture (production)
+## 2. Foundational defects (do not scale over these)
+
+### 2.1 Train-on-test leak (verified)
+
+| Set | n |
+|-----|--:|
+| `backend/rag/router_training.json` | 24 |
+| HYP-002 golden (18) + arch probes (6) | 24 |
+| **Set equality** | **identical** |
+
+Harness mechanism (`backend/rag/eval_hyp002.py`):
+
+- `_labeled_training` builds prototypes from golden + probes.  
+- Embedding arm is fit on that set, then scored on golden (**resubstitution**).  
+- Regex arm never saw the labels (**zero-shot**) — the only fair arm of the pair.
+
+So **“router accuracy 0.333 → 0.833”** (HYP-002 → DEC-011) is **not** a
+generalization comparison and carries **no information about unseen queries**.
+
+Additional notes:
+
+- Centroid router cannot fully reproduce its own labels (review: 15/18 on golden;
+  failures include `where is verify_token defined` → `cross_file`,
+  `queue consumer for background tasks` → `pattern`). Mean-pooling into 6
+  centroids destroys separability even on train points.
+- Undocumented scoring fudge at `eval_hyp002.py:85–86`:
+
+  ```python
+  elif expected == "pattern" and predicted == "semantic":
+      correct += 1
+  ```
+
+  Silently forgives one confusion. Unlabeled metric fudges that promoted a
+  production default are a governance defect regardless of which arm they help.
+
+### 2.2 Circular `answer_slot_purity` (verified)
+
+`answer_slot_purity` compares post-rerank-pre-graph vs full ranked list. When
+`use_graph_append=False`, `_expand_graph` returns input unchanged and the AST
+cap is a no-op on a ≤10 list → **purity = 1.0 by construction**. It re-reads
+the classifier’s graph-off decision as a quality score.
+
+Per-probe pattern on the embedding arm (5/6 = 0.833) is exactly “router
+memorized 5 of 6 training rows as architectural.” That metric **must not**
+gate any future train job.
+
+Independent defect: harness scores bare `route_fn`; production uses
+`CodeRetriever._resolve_route`, which **overrides** the router when a query
+names ≥2 paths. Deployed policy is unmeasured.
+
+### 2.3 Harvest yield is a source property, not a filter bug (measured)
+
+Profile of local `candidates.jsonl` (n=5,832; plan §8 baseline):
+
+| Measurement | Value |
+|-------------|------:|
+| Ask length p50 / p90 | 1,749 / 3,434 chars |
+| Rows 1,500–4,000 chars | 55% |
+| Starts with a question word | 1.6% |
+| System markers (`[Request interrupted…]`, `<command-name>`, …) | 11.3% |
+| Duplicate rows | 31.5% (one ask ×138) |
+| Single tokenjam scratchpad dir | 53% |
+| From Curia itself | 28 |
+| `_looks_code_relevant` pass rate | 99.7% (**not a filter**) |
+| ≤200 chars **and** retrieval-query-shaped | **18 (0.31%)** |
+
+Reading those 18: mostly PR/wording/ops questions, not code-symbol retrieval.
+Realistic yield of genuine code-retrieval labels from ~3,357 files / ~5,851
+episodes is **single digits**.
+
+**Misdiagnosis corrected:** §8 “volume is real; class imbalance and noise
+dominate” was wrong. Volume is **agent conversation turns**. People tell Claude
+Code “fix the failing auth test,” not “where is authenticate_user defined.”
+A chain-aware v2 miner does not fix register mismatch.
+
+**MiniLM truncation:** `all-MiniLM-L6-v2` `max_seq_length=256` (~1,000 chars).
+Median harvest ask is 1,749 chars → majority of tokens silently dropped at
+encode time → Stage B degeneracy (review: `router_pred` ≈ 67% `pattern` /
+24% `architectural`; router↔browse agreement **4.8%**). At 4.8% the two
+signals are near-independent; “disagreements first” is not triage — the queue
+is almost the entire dump.
+
+### 2.4 Production distribution vs harvest
+
+Router input is `clean_query` (context path → `CodeRetriever.retrieve`). Local
+arena conversations (review sample): median **~141 chars**, ~64% ≤200 — a
+much better register match than harvest. Content includes genuine code asks
+**and** OOD (“meditation”, “write a play…”).
+
+`EmbeddingQueryRouter.classify` is always-on `argmax` over 6 prototypes — **no
+abstain, no margin floor, no OOD class**. Non-code asks still get a code-graph
+policy. Highest value-per-line product change: **rejection option** (7th class
+or cosine-margin floor → safe default). Harvest noise is a free **negative** set.
+
+### 2.5 Route is computed and discarded
+
+Route is not logged per turn, not in the retrieval event, not in provenance,
+not in the Observatory. No audit of production routing; no feedback labels
+from real turns — the cheapest high-quality label source. Conflicts with
+observability posture (DEC-025/028; CLAUDE.md retrieval-event contract).
+
+### 2.6 Effort vs ledger priority
+
+**DIS-001** already cleared graph pollution and named remaining precision
+risks: **rerank + index composition** (e.g. Jina promoting docs/eval over
+source). A large router-label/train/publish program without a workstream for
+DIS-001 misaims effort. Ordered tool trails (files actually read) are
+behavioral relevance ground truth and the **primary** justification for mining
+— redirect to a dedicated hypothesis (HYP-004), not “optional later.”
+
+---
+
+## 3. What we route (scope)
+
+### 3.1 Product surface vs train target
+
+| Layer | Definition |
+|-------|------------|
+| **Input** | Natural-language user ask (Curia arena / short code-agent style) |
+| **Recording vocabulary** | 6 categories (keep for future policy splits; free to store) |
+| **Train / gate target** | **3-way policy** (what production actually consumes) |
+
+Verified `route_from_category` → 3 distinct policies:
+
+| `use_graph_append` | `graph_trace` | `seed_k` | Categories |
+|--------------------|---------------|----------|------------|
+| False | False | 0 | `symbol_lookup`, `architectural` |
+| True | False | 3 | `cross_file`, `semantic`, `pattern` |
+| True | True | 3 | `trace` |
+
+`route.category` is consumed nowhere outside `query_router.py` (not trace,
+not provenance, not Observatory). **Confusion within an equivalence class is
+free** for retrieval outcomes. Only **trace** is a genuinely scarce policy
+class among seeds. Gates of “≥20 × 6 classes” overstate the problem: **~40
+labels per policy class** is the statistical framing once collapsed.
+
+### 3.2 Out of scope (this program)
+
+- Fine-tuning ColBERT or Jina  
+- Re-hosting upstream multi-GB weights  
+- Training on unfiltered chat or unredacted private content  
+- Shipping a trained Hub model before honest holdout metrics  
+- LoRA on MiniLM (~22M params) — full FT is seconds on the project GPU; LoRA
+  adds adapter merge + second load path for no benefit (drop from ladder)
+
+### 3.3 In-distribution vs agent-chat
+
+| Corpus | Role |
+|--------|------|
+| Curia arena `clean_query` | **Primary** positive register for router labels |
+| Production route logs (after instrument) | **Best** future labels |
+| Claude/Grok agent harvest | Sparse positives; **strong OOD/negatives**; **(ask → files)** for HYP-004 |
+| Synthetic short queries grounded in **indexed symbols** | Volume at correct register after allowlist |
+
+---
+
+## 4. Current architecture (production)
 
 ```text
-                    USER QUERY
+                    USER QUERY (clean_query)
                          │
                          ▼
               ┌──────────────────────┐
@@ -78,356 +231,338 @@ This is **not**:
    cosine to centroids)
          │
          ▼
-  route_from_category(category)
+  route_from_category → QueryRoute
          │
          ▼
-  QueryRoute ──► CodeRetriever
-                 (ColBERT/bi-encoder, entity, RRF,
-                  Jina rerank, graph append policy)
+  _resolve_route (may override if ≥2 paths named)
+         │
+         ▼
+  CodeRetriever (ColBERT/entity, RRF, Jina, graph append)
 ```
 
-**Centroid construction (today):**
+**Centroid construction today:** encode `router_training.json` with vanilla
+`sentence-transformers/all-MiniLM-L6-v2`, mean-pool per category, argmax cosine.
+**No weight updates. No abstain.**
 
-1. Load `backend/rag/router_training.json` (~24 `{query, category}` rows).  
-2. Encode each query with **vanilla** `sentence-transformers/all-MiniLM-L6-v2`.  
-3. Mean-pool vectors per category → prototype.  
-4. At inference: encode query → argmax cosine similarity.
-
-**No weight updates.** Labels are the only Curia-owned signal.
-
-**Upstream stack (vanilla, via prefetch):**
-
-| Role | Hub id | ~size |
-|------|--------|-------|
-| Semantic | `colbert-ir/colbertv2.0` | ~400–500 MB |
-| Rerank | `jinaai/jina-reranker-v3` | ~1.0–1.3 GB |
-| Router embed | `sentence-transformers/all-MiniLM-L6-v2` | ~80–100 MB |
-| Torch (env) | via `uv sync` | ~1.5–2+ GB |
+**Upstream stack (vanilla, via prefetch):** ColBERT v2, Jina reranker v3,
+MiniLM-L6 (~80–100 MB router embed).
 
 **HF already published (not trained weights):**
 
-| Artifact | Type | Role |
-|----------|------|------|
-| `auspex-aerie/curia-grounding-config` | config + card | Stack recipe; **not loaded at runtime** |
-| `auspex-aerie/curia-router-labels` | dataset | Public mirror of label JSON for reuse |
+| Artifact | Role |
+|----------|------|
+| `auspex-aerie/curia-grounding-config` | Stack recipe; not loaded at runtime |
+| `auspex-aerie/curia-router-labels` | Public mirror of seed label JSON |
 
-Planned later: `auspex-aerie/curia-router` (trained embedder/adapter).
+`auspex-aerie/curia-router` (trained) is **deferred** (`DEF-016`) — not a
+shelf-completeness goal.
 
 ---
 
-## 4. Data: mine from / store to
+## 5. Data: mine from / store to
 
-### 4.1 Sources (mine from)
+### 5.1 Sources (priority revised)
 
-| Priority | Source | Location (local) | Extract |
-|----------|--------|------------------|---------|
-| **P0** | Claude Code sessions | `~/.claude/projects/**/*.jsonl` | user ask + ordered tool_use / tool_result chain |
-| **P1** | Grok Build sessions | `~/.grok/sessions/<id>/` (+ compaction segments) | same episode schema |
-| **P2** | TokenJam research tooling | `tokenjam/research/Reuse/scripts/` (e.g. ask extract patterns) | methods only; **not** our 6-way labels |
-| **P3** | Public coding-agent corpora | SWE-chat, etc. | optional volume; different taxonomy → remap + audit |
+| Priority | Source | Role |
+|----------|--------|------|
+| **P0** | **Instrumented production turns** (after §10 step 0) | Route + margin + real asks; gold feedback loop |
+| **P0** | **Curia conversation corpus** | Short-register positives + OOD for abstain |
+| **P1** | Claude Code / Grok sessions (**allowlisted projects only**) | Sparse router labels; primary use = **files-read trails** for HYP-004; bulk = negatives |
+| **P2** | Synthetic generation grounded in indexed symbols/paths | Short-query volume at correct register |
+| **P3** | Public coding-agent corpora | Optional; remap taxonomy + audit |
 
-**Not primary:** synthetic-only paraphrases of 24 seeds (useful as augmentation **after** real asks exist).
+**Allowlist before next harvest** (not denylist after). Prior unrestricted
+sweep already touched unrelated trees (Bayence/Certus, Ominari, praesage,
+auspexlabs/…, ModelDump, modelark, tokenjam, …). Re-harvest only after
+explicit project consent list.
 
-### 4.2 What one episode must capture (target schema v2)
-
-Today **(shipped v1)** stores flat `ask`, `tools[]`, `paths[]`.  
-**Planned v2** stores the full agent observation loop:
+### 5.2 Episode schema (v2) — pointer-only default
 
 ```json
 {
   "episode_id": "uuid",
-  "source": "claude|grok",
-  "project": "decoded project path",
+  "source": "claude|grok|curia",
+  "project": "allowlisted project id",
   "log_file": "/absolute/path/to/session.jsonl",
-  "ask": "user natural language (unmodified)",
+  "ask": "user text (unmodified; may be long)",
   "steps": [
     {
       "i": 0,
-      "role": "assistant|user",
-      "kind": "text|tool_use|tool_result",
-      "tool": "Read|Grep|Bash|...",
-      "tool_use_id": "toolu_...",
+      "kind": "tool_use|tool_result|text",
+      "tool": "Read|Grep|…",
+      "tool_use_id": "toolu_…",
       "path": "/optional/path",
-      "result_ref": "blob:<sha256> | null",
-      "result_snippet": "first N chars or null",
-      "result_bytes": 1234
+      "result_ptr": {
+        "log_file": "…",
+        "byte_offset": 12345,
+        "content_sha256": "…",
+        "result_bytes": 4096
+      }
     }
   ],
-  "summary": {
-    "tools": ["Read", "Read", "Grep"],
-    "paths": ["..."],
-    "n_reads": 2
-  }
+  "summary": { "tools": ["Read", "Grep"], "paths": ["…"], "n_reads": 2 }
 }
 ```
 
-**Knowable from Claude logs:** tool_use and tool_result are paired (`tool_use_id`); result bodies are present (often hundreds of bytes to tens of KB). So “Read A → content A → Read B” is reconstructible. Hidden chain-of-thought is not.
+**Default and only storage mode for tool results: pointer + content hash.**
+Never copy result bodies into `blobs/`. Disk is not the constraint; **blast
+radius** is (private repo source behind one `.gitignore` line). Offsets need
+**content-hash validation** — Claude Code logs get compacted.
 
-### 4.3 Storage layout (local, not git)
+Knowable from Claude logs: tool_use ↔ tool_result pairing; “Read A → content A
+→ Read B” is reconstructible *from the log file*. Hidden CoT is not.
 
-All harvest lives under the repo tree but **is gitignored** except scaffolding:
+### 5.3 Storage layout (local, gitignored)
 
 ```text
 RAGRouter/Training/
   README.md
-  docs/
-    PLAN.md              ← this file
-    PIPELINE.md          ← operator short path
-  scripts/               ← miners, scorers, LLM assist
-  tests/                 ← unit tests (in CI)
-  data/                  ← gitignored *.jsonl / archives
+  docs/PLAN.md          ← this file
+  docs/PIPELINE.md
+  scripts/
+  tests/
+  data/                 ← gitignored
     .gitkeep
-    raw/                 ← optional full archive (noise OK for audit)
-      episodes_claude_v1.jsonl      # flat harvest (exists as episodes_claude.jsonl today)
-      episodes_v2.jsonl.zst         # planned chain-aware compressed stream
-      index.sqlite                  # planned: episode_id → byte offset, project, flags
-      blobs/                        # planned: sha256 → zstd body
-    clean/               ← filtered episodes for labeling (no train yet)
-    review/              ← human/LLM queue (disagreements, hard cases)
-    train/               ← accepted {query, category} only
-    quarantine/          ← gitleaks hits / redacted drops
+    allowlist.yaml      ← planned: projects permitted to mine
+    raw/                ← pointer-index episodes only
+    clean/              ← filtered for labeling
+    review/
+    train/              ← accepted labels {query, category|policy, source}
+    ood/                ← negatives / not_code_retrieval
+    quarantine/         ← secrets hits; never train
 ```
 
-**Compression / indexing (planned):**
+### 5.4 Filters
 
-- Write **JSONL** lines into **zstd** (stream-friendly).  
-- **SQLite index:** `episode_id`, `source`, `project`, `byte_offset`, `n_tools`, `code_relevant`, `has_secret_hit`.  
-- Blobs for tool results: store by hash; episode holds `result_ref`.  
-- Cap optional: above N KB, store path + hash + pointer back into original `log_file` offset instead of duplicating.
+| Keep | Drop / quarantine |
+|------|-------------------|
+| Short, retrieval-shaped asks (≤~200–400 chars preferred for router) | System markers, slash commands, task-notifications |
+| Curia arena messages + allowlisted agent asks | Mega-pastes as *asks* |
+| Deduped (exact + near-dup) | Duplicate spam (31.5% of v1 dump) |
+| OOD rows for abstain training | Non-allowlisted projects |
+| (ask, files-read) for HYP-004 | **Copied** tool_result bodies |
 
-Disk is assumed abundant; design optimizes for **stream re-read + selective expand**, not minimal footprint.
+### 5.5 Privacy (two risks, not one)
 
-### 4.4 Filters (what we keep vs drop)
+| Risk | Control |
+|------|---------|
+| **Secrets** | **gitleaks** (optional trufflehog) before LLM and before any share. Run on existing ~38 MB harvest still on disk. |
+| **Confidentiality / consent / IP** | **Allowlist** of projects before harvest. gitleaks does not find “unreleased client architecture.” |
+| **Third-party LLMs** | Only redacted short rows; never full tool results; prefer local `claude -p` after scan |
+| **Git** | `data/*` gitignored (verified today for existing harvest files) |
+| **HF** | Only curated public labels / weights after separate consent review — never raw logs |
 
-| Keep for `clean/` / `review/` | Drop or quarantine |
-|-------------------------------|--------------------|
-| User asks that look like **code retrieval** questions | `<task-notification>` and system wrappers |
-| Episodes with code tools (Read/Grep/Edit/…) or code project paths | Slash commands (`/help`, …) |
-| Ordered tool trail as evidence | Huge pastes (smartctl, multi-MB logs) as *asks* |
-| | Pure git/CI “push it” ops (optional: separate ops corpus) |
-| | **gitleaks** findings → `quarantine/` |
-
-**Principle:** raw archive may retain more; **training and review must not**.
-
-### 4.5 Privacy
-
-| Rule | Detail |
-|------|--------|
-| **Scanner** | **[gitleaks](https://github.com/gitleaks/gitleaks)** on all harvest trees before LLM prompt injection and before any share |
-| **Optional second** | trufflehog for verified secrets if needed |
-| **Not** | Hand-maintained secret regex as primary control |
-| **Git** | `RAGRouter/Training/data/*` gitignored; never commit harvest |
-| **HF** | Only curated labels / trained weights after scan + review — never raw logs |
-| **LLM assist** | Run gitleaks (or redaction) before sending rows to OpenRouter / `claude -p` |
+`llm_categorize.py` already pipes prompts on stdin (avoids process-list argv
+leaks) — keep that pattern.
 
 ---
 
-## 5. Labeling pipeline
+## 6. Labeling pipeline
 
 ```text
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐     ┌──────────┐
-│  Claude /   │     │  Episode v2  │     │  Score +    │     │  Human   │
-│  Grok logs  │ ──► │  harvest     │ ──► │  filter +   │ ──► │  curate  │
-│             │     │  + compress  │     │  gitleaks   │     │  ± LLM   │
-└─────────────┘     └──────────────┘     └─────────────┘     └────┬─────┘
-                                                                   │
-                                                                   ▼
-                                                          train/*.jsonl
-                                                          → router_training
-                                                          → (later) train job
+  Production turns ──► retrieval event (route+margin) ──► review / labels
+  Curia convos     ──► short positives + OOD            ──► train/ + ood/
+  Allowlisted logs ──► pointer episodes ──► filter/dedupe ──► sparse + trails
+  Synthetic        ──► symbol-grounded short asks       ──► train/
 ```
 
-### Stage A — Harvest **(v1 shipped; v2 planned)**
-
-| | v1 (shipped) | v2 (planned) |
-|--|--------------|--------------|
-| Script | `scripts/mine_claude_episodes.py` | extend / `mine_claude_episodes_v2.py` |
-| Fields | ask, tools[], paths[], tool_events (names only) | full ordered steps + result refs |
-| Output | `data/episodes_claude.jsonl` | `data/raw/episodes_v2.jsonl.zst` + index |
-
-### Stage B — Score **(shipped)**
-
-| Signal | How |
-|--------|-----|
-| `router_pred` | Production `route_query(ask)` |
-| `browse_pred` | Heuristic from tools/paths (+ weak text cues) |
-| `code_relevant` | Project/path/tool/ask heuristics |
-| `disagreements` | `router_pred ≠ browse_pred` among code-relevant |
-
-Scripts: `score_candidates.py` (`--code-only`).
-
-**Note:** High disagreement rate on unfiltered agent chat is expected; browse heuristic is weak. Disagreements are a **review queue**, not auto-labels.
-
-### Stage B+ — LLM assist **(shipped optional)**
-
-`llm_categorize.py`:
-
-- `--backend openrouter` (`OPENROUTER_API_KEY`)  
-- `--backend claude_p` (`claude -p`, prompt on **stdin**)  
-
-Fills `llm_pred` / `llm_reason`; **does not** set final `label`.
-
-### Stage C — Human curation **(process, not fully automated)**
-
-- Review `review/` queue (disagreements first, then sample of agreements).  
-- Set `label` ∈ categories; reject OOD.  
-- Export accepted rows as `{ "query", "category" }` into `train/` and eventually merge into `backend/rag/router_training.json` (or a versioned train file).
-
-### Stage D — Train **(planned; gated)**
-
-Only after data gates (below).
+| Stage | Status | Notes |
+|-------|--------|-------|
+| A harvest v1 flat | **Shipped** | Treat as archive; not a train set |
+| A harvest v2 pointer-only + allowlist | **Planned** | No body blobs |
+| B score | **Shipped** | Weak; not triage until short-query filter exists |
+| B+ LLM assist | **Shipped optional** | After gitleaks + redaction |
+| C human curation | **Process** | Policy 3-way + optional 6-way vocab |
+| D train | **Gated** | Only after §7 gates |
 
 ---
 
-## 6. Training recipe (when data is ready)
+## 7. Training recipe (when data is ready)
 
-### 6.1 Starting model
+### 7.1 Starting encoder
 
 | Choice | Value |
 |--------|--------|
-| **Base** | `sentence-transformers/all-MiniLM-L6-v2` |
-| **Why** | Same family as production encoder; small; already in prefetch stack |
-| **Not starting with** | DistilBERT CE-only (HYP-002 optional C), full ColBERT FT, large LLMs |
+| **Encoder** | `sentence-transformers/all-MiniLM-L6-v2` (frozen) |
+| **Why** | Already in stack; fine for **short** queries |
+| **Constraint** | `max_seq_length=256` — **disqualifying for long agent pastes**; not a reason to swap backbone first — fix **input length and label provenance** |
 
-### 6.2 Training objectives (priority order)
+### 7.2 Model ladder (corrected)
+
+**Not** “centroid → CE/SetFit → LoRA → SupCon” (mixed objectives with parameterizations; LoRA inappropriate at ~22M).
 
 | Order | Method | When |
 |-------|--------|------|
-| **1 (first ship)** | Classification head (or **SetFit**-style) on MiniLM | ≥ ~20–50 examples/class after curation |
-| **2** | **LoRA** on MiniLM (r=8–16) for small Hub artifact | Same data bar; prefer if full FT is heavy |
-| **3** | **SupCon** (supervised contrastive) by category “family” | Only when **min class ≥ ~10–15** (ideally 50+); not viable with current 1-shot classes |
+| **0 (ship soon)** | Centroid + **margin abstain** (safe default) | Immediately after instrumentation; nearly free |
+| **1 (first fit)** | **Multinomial logistic regression** on frozen MiniLM embeddings, 3-way policy + reject option | O(10²) labels; k-fold CV |
+| **2** | Optional full FT of MiniLM + head | Only if logistic probe plateaus and data grows |
+| **Avoid** | LoRA on MiniLM; SupCon until policy-class counts are large **and** objective is justified |
 
-**SupCon note:** families = the 6 categories (optionally superclasses graph-on vs graph-off later). With `trace`/`pattern` n=1 in seed labels, SupCon is **blocked**.
+Centroids are the special case that forces decision boundaries to perpendicular
+bisectors of class means; logistic probe **strictly dominates** that geometry
+with the same encoder and tiny code (~30 lines), no new runtime dependency,
+no Hub artifact required.
 
-### 6.3 Data gates before any train run
+### 7.3 Data gates before any train run
 
 | Gate | Target |
 |------|--------|
-| Min examples per class | ≥ 20 (stretch 50+) |
-| Holdout | Stratified ~20% |
-| Secret scan | Clean on train/ |
-| Noise | No task-notifications / slash / mega-pastes as queries |
-| Eval | Classification accuracy **and** HYP-002-style downstream (arch purity / graph pollution), not train accuracy alone |
+| Eval set | **Zero overlap** with `router_training.json` seed rows |
+| Policy labels | Prefer 3-way (off / 1-hop / trace); 6-way optional vocabulary |
+| Min examples | ~40+ per **policy** class stretch; report k-fold, not single holdout of n≈24 |
+| Power | Pre-register win effect size; report mean ± CI (95% CI on n=24 accuracy is ~±20pp — not a measurement) |
+| Secrets / allowlist | Clean train/; only allowlisted sources |
+| Noise | No system markers / mega-pastes as queries |
+| Length | Router training queries truncated or filtered to encoder budget |
 
-### 6.4 Eval harness
+### 7.4 Eval harness (replace HYP-002 gates)
 
-Reuse / extend:
+| Metric | Role |
+|--------|------|
+| **Router policy accuracy** on **held-out** short queries | Classification; score **`_resolve_route`**, not bare `route_fn` |
+| **Recall / nDCG** with graph forced **on vs off** | Downstream retrieval; real quality |
+| ~~`answer_slot_purity`~~ | **Retired as gate** — circular under graph-off |
+| Undocumented pattern↔semantic fudge | **Remove**; if equivalence classes are free, score **policy 3-way** explicitly |
 
-- HYP-001 golden queries with `category` where present  
-- HYP-002 architectural probes  
-- `backend/run_hyp002.py` patterns  
-- New holdout from curated agent asks  
+Reuse golden **queries** only if they are **not** also used to fit prototypes.
+Build new router eval set; re-score regex vs centroid honestly → **HYP-003**.
+DEC-011 may survive; it must survive on **honest** evidence.
 
-Report: per-class F1, confusion matrix, router accuracy, retrieval purity metrics under graph on/off as implied by predicted class.
+### 7.5 Ship path (Hub)
 
-### 6.5 Ship path
-
-1. Export model or LoRA adapter.  
-2. Card + id: `auspex-aerie/curia-router`.  
-3. Runtime: env or config to load Hub id instead of centroid file (optional dual path).  
-4. Prefetch: extend `curia-prefetch-rag` (or document `huggingface-cli download`).  
-5. Fallback: keep centroid router if load fails.
+Deferred (`DEF-016`). Runtime can load a logistic head or small FT from disk
+without a public model card. Public `curia-router` needs its own consent review.
 
 ---
 
-## 7. Future architecture
+## 8. Future architecture
 
 ```text
                          USER QUERY
                               │
               ┌───────────────┴───────────────┐
               ▼                               ▼
-     Learned curia-router              Centroid / regex
-     (MiniLM+head or LoRA)             fallback
+     Frozen MiniLM + logistic             Centroid / regex
+     (+ margin abstain → safe default)    fallback
               │                               │
               └───────────────┬───────────────┘
                               ▼
-                       QueryRoute flags
+                       _resolve_route
                               │
                               ▼
-                    CodeRetriever (unchanged topology)
-                    ColBERT + entity + RRF + Jina + graph append
+                    QueryRoute flags → CodeRetriever
+                    (topology unchanged: ColBERT + RRF + Jina + append graph)
+                              │
+                              ▼
+                    Retrieval event records:
+                    category, policy flags, top-2 cosine, margin
+                    → Observatory
 ```
 
-**Optional later (same harvest, different models):**
-
-- Next-tool / next-path models for agent UX (not required for RAG route)  
-- Query–file relevance pairs from (ask, files actually read)  
-- Remote load of `curia-grounding-config` as stack recipe (DEC-033 deferred)
+**Parallel track (HYP-004):** (ask → files actually read) → relevance pairs for
+reranker / index composition (DIS-001), separate gates.
 
 ---
 
-## 8. What already ran (baseline harvest)
-
-As of 2026-07-31 on the primary dev machine (illustrative; re-run as needed):
+## 9. What already ran (baseline harvest — re-read)
 
 | Artifact | Count |
 |----------|------:|
-| Claude files scanned | ~3357 |
-| Episodes (v1 flat) | ~5851 |
-| Code-relevant candidates | ~5832 |
-| Code disagreements | ~5553 |
+| Claude files scanned | ~3,357 |
+| Episodes (v1 flat) | ~5,851 |
+| “Code-relevant” candidates | ~5,832 (99.7% pass — filter inert) |
+| Code disagreements | ~5,553 (~4.8% agreement) |
+| Short retrieval-shaped | **~18 (0.31%)** |
 
-**Interpretation:** volume is real; **class imbalance and noise** dominate (router over-predicts `pattern`; many agent-ops asks). v1 harvest is **raw material**, not a training set.
+**Correct interpretation:** agent-turn volume is real; **usable router-label
+volume is not**. v1 dump is raw material for **OOD negatives** and (after
+allowlist + pointer re-mine) **file-read trails** — not a training set.
 
 ---
 
-## 9. Implementation status
+## 10. Workstream order (revised)
+
+| # | Work | Why first |
+|---|------|-----------|
+| **0** | **Instrument** route into retrieval event + Observatory (category, 3 flags, top-2 cosine, margin). Land as DEC. | Unblocks audit + production labels; no mining, no privacy cost |
+| **1** | **De-contaminate eval** — new router set with zero overlap with seeds; re-score regex vs centroid (HYP-003). | DEC-011 must rest on generalization evidence |
+| **2** | **Fix metrics** — retire purity-as-gate; score `_resolve_route`; remove pattern↔semantic fudge or replace with explicit 3-way scoring | Stop blessing models that cannot fail the metric |
+| **3** | **Train/gate target = 3-way policy**; keep 6-way as recording vocabulary only | Matches production consumption |
+| **4** | **Abstain** — 7th class or margin floor → safe default; use harvest noise as free negatives | Highest value-per-line product fix |
+| **5** | **Re-aim harvest** — allowlist, pointer-only storage, system-marker filter, dedupe; expect **tens** of router labels; synthetic short queries for volume | Source property accepted |
+| **6** | **Fit model only if** gates pass — logistic probe on frozen MiniLM first | Dominates centroids; no Hub required |
+| **7** | Hub publish **only** after separate consent review | `DEF-016` |
+| **∥** | **HYP-004** — (ask → files-read) → DIS-001 rerank/index work | Primary value of mining |
+
+**Not in this order:** train-on-v1-disagreements, blob stores of tool results,
+LoRA, premature SupCon, shelf-driven Hub publish.
+
+### 10.1 Minor code defects (fix while in the area)
+
+| Item | Issue |
+|------|--------|
+| `mine_claude_episodes.py` `_project_from_dir_name` | Replaces all `-` with `/`, mangling hyphenated names / weird `tmp/claude/…` paths |
+| `_is_usable_ask` | Does not filter system markers (11.3%) |
+| `_looks_code_relevant` | ~99.7% pass rate — not a filter |
+| `score_candidates.py` ~171–173 | Dead branch |
+| Trace/arch regexes | Diverge across `hybrid.py`, `query_router.py`, `scripts/categories.py` — consolidate |
+
+---
+
+## 11. External review — §11 answers (recorded)
+
+| # | Question | Answer (absorbed) |
+|---|----------|-------------------|
+| 1 | 6-class or graph on/off? | **Neither pure form** — **3-way** (off / 1-hop / trace). Keep 6 labels as recording vocabulary. |
+| 2 | MiniLM backbone? | Fine as encoder; **max_seq_length=256** kills long agent asks. Fix length + provenance first. |
+| 3 | centroid → CE/SetFit → LoRA? | **Neither ladder.** Logistic probe on frozen MiniLM + reject option; k-fold CV. **Drop LoRA.** |
+| 4 | Full blobs vs pointer? | **Pointer always.** Content-hash validated. Never copy tool_result bodies. |
+| 5 | Must-exclude projects? | **Wrong polarity** — **allowlist before** harvest. |
+| 6 | Downstream gate metrics? | **Not** arch purity. Gate on recall/nDCG graph on vs off via `_resolve_route`, zero seed overlap. |
+
+---
+
+## 12. Implementation status
 
 | Item | Status |
 |------|--------|
-| `mine_claude_episodes.py` (flat) | **Shipped** |
-| `score_candidates.py` + `--code-only` | **Shipped** |
-| `llm_categorize.py` (OpenRouter / claude -p stdin) | **Shipped** |
-| Unit tests + CI path | **Shipped** |
-| Chain-aware v2 harvest + zstd + sqlite index | **Planned** |
-| gitleaks gate in pipeline | **Planned** |
-| Grok miner | **Planned** |
-| Review CLI / accept-into-train | **Planned** |
-| Train job + Hub publish `curia-router` | **Planned (gated)** |
+| v1 Claude harvest + score + LLM assist + tests/CI | **Shipped** |
+| PLAN v1 (pre-review) | **Superseded by this revision** |
+| Route instrumentation in retrieval event | **Planned (step 0)** |
+| Honest holdout eval (HYP-003) | **Planned** |
+| Purity gate retirement / `_resolve_route` scoring | **Planned** |
+| Margin abstain / OOD class | **Planned** |
+| Allowlist + pointer-only harvest | **Planned** |
+| Logistic probe train job | **Planned (gated)** |
+| HYP-004 file-trail relevance | **Planned (parallel)** |
+| Hub `curia-router` | **Deferred (`DEF-016`)** |
 
 ---
 
-## 10. Workstream order (for implementers)
-
-1. **Episode v2** — ordered steps + tool_result linking + compressed store + index.  
-2. **gitleaks** — scan `data/` before LLM and before any export.  
-3. **Filters** — clean/ + review/ separation; drop notification/paste noise from review.  
-4. **Re-harvest** Claude → v2 files (leave v1 as raw archive if useful).  
-5. **LLM + human curation** on code disagreements / hard cases.  
-6. **Only then** train (CE/SetFit → optional LoRA → optional SupCon).  
-7. Publish + wire runtime.
-
----
-
-## 11. External review checklist
-
-Please challenge:
-
-1. Is the **6-class taxonomy** still the right product surface, or should we collapse to graph-on/off first?  
-2. Is **MiniLM** the right starting backbone for code-agent asks?  
-3. Is **centroid → CE/SetFit → LoRA** the right escalation, or SetFit-only?  
-4. Storage: full tool_result blobs vs path+snippet+log pointer — tradeoff for your privacy posture?  
-5. Any **must-exclude** projects or log sources from mining?  
-6. Eval: which downstream metrics are gate vs informative only?
-
----
-
-## 12. References (in-repo)
+## 13. References (in-repo)
 
 | Doc / code | Why |
 |------------|-----|
-| `backend/rag/query_router.py` | Production router |
-| `backend/rag/router_training.json` | Seed labels (24) |
-| `backend/rag/retriever.py` | How `QueryRoute` affects retrieval |
-| `docs/decision_log.md` HYP-002, DEC-010, DEC-011 | Why embedding router exists |
+| `backend/rag/query_router.py` | Production router + 3-way mapping |
+| `backend/rag/router_training.json` | Seed labels (= HYP-002 set) |
+| `backend/rag/eval_hyp002.py` | Contaminated harness |
+| `backend/rag/retriever.py` | `_resolve_route`, graph append |
+| `docs/decision_log.md` | DEC-010/011, DIS-001, DIS-004+, INC-008, DEC-036 |
 | `docs/hf_hub.md` | Hub naming; no re-host upstream weights |
 | `RAGRouter/Training/README.md` | Operator commands |
 | `RAGRouter/Training/docs/PIPELINE.md` | Short stage list |
-| `backend/rag/hf_models.py` | Prefetch of vanilla stack |
 
 ---
 
-## 13. One-paragraph summary
+## 14. One-paragraph summary
 
-We route **query intent → graph/trace policy** with a **frozen MiniLM centroid router** and ~24 labels. To improve, we mine **Claude (then Grok) agent logs** into a **compressed, indexed episode store** that preserves **tool chains and results**, **filter noise**, **scan secrets with gitleaks**, **curate labels** (LLM-assisted), and only then **fine-tune MiniLM** (CE/SetFit, optional LoRA; SupCon when classes are large enough) for `auspex-aerie/curia-router`. Upstream ColBERT/Jina stay vanilla; HF config/labels already published are **not** a trained router.
+We route **query intent → graph/trace policy** with a **frozen MiniLM centroid
+router** promoted on **resubstitution** evidence that must be re-run honestly.
+Production consumes a **3-way policy**, not six independent classes; category is
+not yet observable. Agent-chat harvest yields ~**0.3%** short retrieval asks —
+use it for **OOD negatives** and **files-read trails** (DIS-001 / HYP-004), not
+as a bulk router train set. **Instrument the route first**, decontaminate eval,
+add **abstain**, gate on real retrieval metrics through `_resolve_route`, then
+fit a **logistic probe** on short-register labels. Pointer-only allowlisted
+storage; **no** tool_result blobs; **no** Hub model until consent and evidence
+exist.
