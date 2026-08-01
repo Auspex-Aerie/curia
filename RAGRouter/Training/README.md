@@ -6,7 +6,8 @@ Runtime router today: frozen MiniLM + centroids from
 `backend/rag/router_training.json` (~24 seeds). This folder is **not** on the
 serving path.
 
-**Full recipe (external review + 2026-08-01 revision):** [docs/PLAN.md](docs/PLAN.md)
+**Full recipe (external review + 2026-08-01 revision):** [docs/PLAN.md](docs/PLAN.md)  
+**Rolling handback (iterate the plan; zero between passes):** [docs/handback.md](docs/handback.md)
 
 Program direction is **`DEC-036`**: instrument production routes, decontaminate
 eval (`HYP-003`), train/gate on **3-way policy** (not 6 independent classes),

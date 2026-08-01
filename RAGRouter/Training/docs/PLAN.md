@@ -6,7 +6,8 @@
 **Code home:** `RAGRouter/Training/` (offline; not on the serving path)  
 **Runtime router:** `backend/rag/query_router.py`  
 **Related ledger:** `DIS-004`–`DIS-006`, `INC-008`, `DEC-036`, `DEF-016`, `HYP-003`, `HYP-004`  
-**Also:** HYP-002, DEC-010, DEC-011, DIS-001, `docs/hf_hub.md`, `backend/rag/router_training.json`
+**Also:** HYP-002, DEC-010, DEC-011, DIS-001, `docs/hf_hub.md`, `backend/rag/router_training.json`  
+**Rolling plan iteration with external reviewer:** [`handback.md`](handback.md) (zero body between passes; ledger/PLAN are durable)
 
 This document is the **full recipe** for external review. It absorbs a 2026-08-01
 read-only review that verified load-bearing defects in the evidence behind the
