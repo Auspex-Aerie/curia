@@ -673,7 +673,7 @@ _(pending)_
 - **impact:** PLAN §7.6 / §10 rewritten. Do not implement DEC-039 k=20 or nDCG-primary null-exit.
 
 ### DEC-041: Close pass-f pushbacks — chunk-matched null-exit and residual gates
-- **date:** 2026-08-02 · **status:** accepted · **triggered_by:** handback pass-f PB1–PB7 reviewer answers; code verify of `retrieve_post_rerank_pre_graph` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6, `RAGRouter/Training/docs/handback.md` · **related:** `DEC-040`, `DEF-017`, `HYP-003`, `DIS-008`, `DIS-009`
+- **date:** 2026-08-02 · **status:** superseded in part by `DEC-042` (per-query pad_i) · **triggered_by:** handback pass-f PB1–PB7 reviewer answers; code verify of `retrieve_post_rerank_pre_graph` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6, `RAGRouter/Training/docs/handback.md` · **related:** `DEC-040`, `DEF-017`, `HYP-003`, `DIS-008`, `DIS-009`
 - **decision:**
   1. **PB1 null-exit control = chunk-matched (C):** graph-on vs **padded graph-off** taking the next `graph_append_slots` from the same full-pool rerank list (`ranked[:k+pad]`). Not bare empty tail (A); not Δrecall/Δtokens ≥ X (B — unnameable, unstable). Primary = **file-level recall** at matched length; Δrecall ≥ 0.05; α=0.05. Harness must pass **k+pad** into `_select_source_diverse` when path mentions exist. Bias disclosure: C is stricter / more null-exit-prone than A.
   2. **PB2:** W2 — product DEC required to continue train if below gate; rare under matched budgets.
@@ -684,3 +684,12 @@ _(pending)_
   7. **PB7:** Majority check = paired CI **lower bound** exceeds majority point estimate; report-only, not DEF-017/DEC-011 flip.
 - **rationale:** Verified padded arm is a slice of already-ranked pool (not a heavy second retrieval). Counterfactual matches product question “are graph neighbors better than the next pool chunks?” Rejected unnameable cost ratio. Remaining PB answers were implementer defaults or tightenings.
 - **impact:** PLAN §7.6 B/D/E/F/G/H current. Implement null-exit harness with pad + diverse-select fix; do not implement bare graph-off-only primary.
+
+### DEC-042: Per-query length-matched padded control; append-fill report; close plan iteration
+- **date:** 2026-08-02 · **status:** accepted · **triggered_by:** handback pass-g final cell on `DEC-041` §1; verified `_expand_graph` append 0…slots · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6 B, `RAGRouter/Training/docs/handback.md` · **related:** `DEC-041`, `DEF-017`, `DIS-005`, `DIS-008`, `DIS-009`, `DIS-001`
+- **decision:**
+  1. Padded control uses **`pad_i = max(0, len(graph_on_i) - rerank_top_k)`** from the **final** `retrieve_ranked` output per query, then `pre_graph_ranked[:rerank_top_k + pad_i]`. **Not** fixed `pad = graph_append_slots`. Assert equal lengths. Path-mention: `_select_source_diverse(..., k+pad_i)`.
+  2. **Mandatory:** publish append-fill distribution (chunks actually appended per gold query). Near-zero fill ⇒ interpret as graph/index engagement failure (DIS-001 territory), **not** “routing doesn’t matter”; do not fire DEF-017 train-drop from degenerate fill alone.
+  3. All other `DEC-041` PB locks stand. **Plan iteration closed** from reviewer side; next work is implement `DEC-037` (+040/041/042 harness rules).
+- **rationale:** Fixed pad=10 length-mismatches when append under-fills (0…10 new neighbors after seed dedupe + post-cap), inflating control recall and biasing null-exit — same decision-bias class as DIS-005/008/009. Per-query match restores the equal-budget counterfactual.
+- **impact:** Null-exit harness must compute pad from treatment arm final length. PLAN §7.6 B updated.

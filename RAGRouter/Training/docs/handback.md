@@ -1,62 +1,48 @@
 # RAGRouter plan — rolling handback
 
-**Purpose:** iterate on [`PLAN.md`](PLAN.md). Zero This pass + Reviewer response when absorbed.
+**Purpose:** shared surface for plan iteration. **Plan iteration is CLOSED.**
+
+Durable truth: [`PLAN.md`](PLAN.md) §7.6 + `docs/decision_log.md` (`DEC-036`…`DEC-042`).
 
 ---
 
-## Pointers (stable)
+## Pointers
 
 | Item | Location |
 |------|----------|
-| Recipe | [`PLAN.md`](PLAN.md) **§7.6** — current lock **`DEC-041`** |
+| Recipe | [`PLAN.md`](PLAN.md) |
 | Ledger | [`../../../docs/decision_log.md`](../../../docs/decision_log.md) |
 | PR | https://github.com/Auspex-Aerie/curia/pull/34 |
-
-**Ledger:** `DIS-004`–`DIS-009`, `INC-008`, `HYP-003`–`004`, `DEC-036`–`041`, `DEF-016`–`017`.
 
 ---
 
 ## This pass
 
-**Pass id:** `2026-08-02-g`  
-**From:** implementer  
-**To:** reviewer  
-**Status:** PB1–PB7 absorbed into **`DEC-041`**. Code-verified padded control. **LGTM to close plan iteration**, or cell counters only.
+**Pass id:** `2026-08-02-closed`  
+**Status:** **CLOSED** — no open cells
 
-### Locked from your PB answers
+### Final cell absorbed (`DEC-042`)
 
-| PB | Lock |
-|----|------|
-| **PB1** | **(C)** graph-on vs `ranked[:k+pad]` padded control; file-level recall; Δ≥0.05; no X ratio. Watch `_select_source_diverse(k+pad)`. Bias: C harder null-exit — **logged** |
-| **PB2** | **W2** |
-| **PB3** | Retune-first; sweep = **exploratory** only |
-| **PB4** | Gold multi-hop marks + rule of three + 200 turns + FN~30 |
-| **PB5** | File-level v1; no fixture DEF-017; author ~40 from index + provenance |
-| **PB6** | E1+E3; **abort if suppressed_by_abs_floor > 0** in 200 |
-| **PB7** | CI lower bound > majority point estimate (report-only) |
+- Control pad is **per-query**: `pad_i = len(graph_on) - rerank_top_k` from final `retrieve_ranked`, not fixed 10.  
+- Assert length match; `_select_source_diverse(k + pad_i)`.  
+- **Report append-fill distribution**; near-zero fill ≠ “routing useless” (DIS-001 vs DEF-017).  
+- Reviewer LGTM on all other PB locks.
 
-### Implementer verification note (PB1)
+### Next (implementation — not plan review)
 
-Confirmed in `retriever.py`: full-pool rerank then `ranked[:k]`; pool cap 64 / candidates 50 ≥ 30. Accepted (C) after that check — not rubber-stamped.
+1. `DEC-037` / `040` / `041` / `042` — route record in conversation JSON, floors log-only, narrow multi-hop, null-exit harness with per-query pad.  
+2. Do **not** mine/train/publish until gold + powered gates.
 
-### What we want
+### Reviewer response
 
-- **LGTM** → plan iteration **done**; implement `DEC-037`+`040`+`041` (instrument, narrow regex, null-exit harness with pad).  
-- Or **one more cell** only if something is still wrong.
-
-No open implementer pushbacks remaining.
+_(closed — no further plan review required)_
 
 ---
 
-## Reviewer response
+## Closed passes (index)
 
-_(empty — LGTM or final cells)_
-
----
-
-## Closed passes
-
-| Pass | Closed | Outcome |
-|------|--------|---------|
-| `2026-08-01-a` … `e` | … | Foundations → `DEC-040` |
-| `2026-08-02-f` | 2026-08-02 | PB1–PB7 → **`DEC-041`** |
+| Pass | Outcome |
+|------|---------|
+| a–e | Foundations → metrics → `DEC-040` |
+| f | PB1–PB7 → `DEC-041` |
+| g | Per-query pad + append-fill → **`DEC-042`**; **iteration closed** |

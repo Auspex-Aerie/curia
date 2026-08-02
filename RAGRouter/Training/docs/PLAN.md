@@ -1,16 +1,17 @@
 # RAG Router Training Plan
 
-**Status:** revised after external review (2026-08-01) + pass-b handback (2026-08-02)  
+**Status:** plan iteration **closed** (2026-08-02); ready to implement `DEC-037`+  
 **Date:** 2026-08-02  
 **Owner:** Curia / Auspex-Aerie  
 **Code home:** `RAGRouter/Training/` (offline; not on the serving path)  
 **Runtime router:** `backend/rag/query_router.py`  
-**Related ledger:** `DIS-004`–`DIS-009`, `INC-008`, `DEC-036`–`DEC-041`, `DEF-016`–`DEF-017`, `HYP-003`, `HYP-004`  
+**Related ledger:** `DIS-004`–`DIS-009`, `INC-008`, `DEC-036`–`DEC-042`, `DEF-016`–`DEF-017`, `HYP-003`, `HYP-004`  
 **Also:** HYP-002, DEC-010, DEC-011, DIS-001, `docs/hf_hub.md`, `backend/rag/router_training.json`  
-**Rolling plan iteration with external reviewer:** [`handback.md`](handback.md) (zero body between passes; ledger/PLAN are durable)
+**Rolling plan iteration with external reviewer:** [`handback.md`](handback.md)
 
-This document is the **full recipe**. Pass-f pushbacks PB1–PB7 closed in
-`DEC-041` (chunk-matched null-exit, gold multi-hop gate, floor abort, etc.).
+This document is the **full recipe**. Plan iteration **closed** after pass-g
+final cell (`DEC-042` per-query length match + append-fill report). Implement
+from `DEC-037` next.
 
 ---
 
@@ -497,35 +498,54 @@ numbers and the null-exit **window** (highest severity).
 
 **Decision-relevant counterfactual (PB1 → C, locked):**  
 The alternative to appending graph neighbors is **not** “append nothing” — it is
-“append the **next** `graph_append_slots` chunks from the already-reranked pool.”
-If graph tails are no better than the next pool slices, you do not need a router:
-always take a longer pool. That is the proposition steps 3–6 rest on.
+“append the **next** pool chunks from the already-reranked list,” length-matched
+to what graph actually contributed on that query. If graph tails are no better
+than those pool slices, you do not need a router. That is the proposition steps
+3–6 rest on.
 
 **Code fact (verified):** `retrieve_post_rerank_pre_graph` reranks the **full**
-pool (`top_k=len(pool)`), then discards the tail with `return ranked[:k]`. The
-padded control is therefore a **slice**, not a second retrieval:
-`ranked[: rerank_top_k + graph_append_slots]` on the same ranked list.
-Pool headroom: `candidate_limit = min(retrieve_candidates + …, 64)` with
-`retrieve_candidates` default **50** ≥ 20+10.
+pool (`top_k=len(pool)`), then discards the tail with `return ranked[:k]`.
+`_expand_graph` appends only **new** neighbors (seeds already in `seen`), so
+appended count is **0…graph_append_slots**, not always 10; then
+`_dedupe_parent_content` / `apply_ast_aware_cap` can shrink further.
+Pool headroom: `candidate_limit = min(…, 64)` with default candidates **50**.
 
-**Silent-failure wrinkle (must fix in harness):** when
-`extract_path_mentions(query)` is non-empty, `_select_source_diverse(ranked, k)`
-truncates to **k before** the final slice — so `ranked[:k+pad]` silently stays
-length k. **Padded arm must pass `k+pad` into `_select_source_diverse` too.**
+**Final cell fix (`DEC-042`):** pad is **per-query**, not fixed at
+`graph_append_slots`.
+
+```text
+graph_on_i  = retrieve_ranked(query_i)          # final list after append+dedupe+cap
+pad_i       = max(0, len(graph_on_i) - rerank_top_k)
+control_i   = pre_graph_ranked[: rerank_top_k + pad_i]   # same pool ranking, no graph
+assert len(control_i) == len(graph_on_i)        # after construction; pad_i from FINAL on-arm
+```
+
+**Why fixed pad=10 is decision-biased (class of DIS-005/008/009):**  
+Fixed control length 30 vs treatment `20+n` (n∈0…10) **inflates control recall**
+whenever the graph under-fills → depresses Δ(on−off) → null-exit fires too often,
+**worst where the graph is sparsest**. Mismatched budgets.
+
+**Silent-failure wrinkle:** path mentions → `_select_source_diverse(ranked, k)`
+before slice; control must use **`k + pad_i`** in that call.
 
 | Parameter | Pre-registered value |
 |-----------|----------------------|
-| **Arms** | **Graph-on:** production path (`retrieve_ranked` with append). **Control (padded graph-off):** same pre-graph ranking, take first `rerank_top_k + graph_append_slots` pool chunks, **no** graph expand; budgets **chunk-matched** |
-| **What to score** | Full list each arm returns (post any AST cap as production does for graph-on; control must use the **same** final length rule so budgets stay matched — prefer scoring both at `min(len_on, len_off)` after construction, or force control length = graph-on length) |
-| **Harness asserts** | (1) graph-on `k_eff > rerank_top_k` when append fired; (2) control length matches graph-on length (±0); (3) path-mention queries: diverse select uses **k+pad** on control. Read knobs from **live config** |
-| **Primary metric** | **File-level recall** at matched length (see §H) — presence of gold **files** in the injected set |
-| **Practical significance** | Mean Δ recall (graph-on − padded-off) ≥ **+0.05**; α=0.05 paired test |
+| **Arms** | **Graph-on:** production `retrieve_ranked`. **Control:** same pre-graph ranking, length **`rerank_top_k + pad_i`** with **`pad_i` from final graph-on length** (not fixed slots) |
+| **Harness asserts** | (1) `len(control) == len(graph_on)` per query; (2) if append engaged, graph-on longer than pure answer slots **or** pad_i documented 0; (3) path-mention: diverse select uses `k+pad_i`. Live config knobs only |
+| **Primary metric** | **File-level recall** at matched length |
+| **Practical significance** | Mean Δ recall (on − control) ≥ **+0.05**; α=0.05 paired |
+| **Mandatory report** | **Append-fill distribution** (chunks actually appended per gold query; histogram + mean). If most append 0 → null result is **“graph rarely engages on this index”** (DIS-001 / graph construction), **not** “routing doesn’t matter” — do **not** fire DEF-017 train-drop from evidence that is really index-empty |
 | **nDCG** | Diagnostic only |
-| **Cost co-report** | Optional under matched budgets (Δtokens ≈ 0 by design); still log lengths |
-| **Bias disclosure** | Chunk-matched control is a **stricter** null-exit than bare graph-off — **biases toward firing DEF-017**. Reviewer proposed it; implementer accepted after code verify |
-| **Rejected** | (B) Δrecall/Δtokens ≥ X — unnameable X, unstable as Δtokens→0, same failure mode as τ=0.25. (A) bare graph-off — leaves length confound |
+| **Bias disclosure** | Equal-budget pool control is still stricter than bare empty-tail; reviewer-proposed; implementer code-verified |
+| **Rejected** | Fixed `pad = graph_append_slots`; (B) Δrecall/Δtokens ≥ X; (A) bare graph-off |
 
-**Economically weak / W2 (`DEC-041` PB2):** under matched budgets, “tiny recall for many tokens” cannot arise. Residual “real but small at equal cost” is handled by the **0.05** floor. If something still looks product-valuable but below gate: **W2** — do **not** start steps 3–6 without an explicit product DEC. Not W1 (over-fires) or W3 (prose hole).
+**DEF-017 reading rule:** if append-fill is near-zero on gold, open graph/index
+work (DIS-001 territory) before claiming router train is worthless. DEF-017 drops
+steps 3–6 only when the graph **engages** (non-degenerate fill) and still loses
+the chunk-matched test (after exploratory sweep).
+
+**Economically weak / W2:** matched budgets; residual small effect → product DEC
+required for train.
 
 #### C. Floor thresholds τ / δ — + partition (`DEC-040` C4)
 
@@ -568,7 +588,7 @@ with path-first).
 
 | PB | Verdict | Locked |
 |----|---------|--------|
-| **PB1** | **Counter → (C)** chunk-matched | Graph-on vs padded pool tail; no Δrecall/Δtokens X; code-verified slice |
+| **PB1** | **(C)** + **per-query pad_i** (`DEC-042`) | Match final graph-on length; report append-fill; no fixed pad=10 |
 | **PB2** | **W2** | Product DEC required if below gate but “feels valuable”; rare under C |
 | **PB3** | **Retune-first** + exploratory sweep label | Positive cell ≠ train; re-null under new defaults |
 | **PB4** | Deferred retire gate | Gold multi-hop marks + rule of three + 200 turns + FN sample |
@@ -741,7 +761,7 @@ SupCon, shelf-driven Hub, archiving private harvest dumps in-tree.
 | PLAN pre-review / pass-a / pass-b | **This doc** |
 | Route log schema pin | **`DEC-037` — implement next** |
 | Abs + margin floors | **Planned (0b)**; thresholds in `DEC-038` |
-| Pre-registered metrics / floors / gold / null-exit design | **`DEC-041` current** (amends 038–040) |
+| Pre-registered metrics / floors / gold / null-exit design | **`DEC-042` current** (per-query pad; amends 038–041) |
 | Honest holdout eval (HYP-003) | **Planned** (numbers in §7.6) |
 | Purity gate retirement / `_resolve_route` scoring | **Planned** |
 | Allowlist + pointer-only harvest | **Planned** (default-deny) |
@@ -770,9 +790,9 @@ SupCon, shelf-driven Hub, archiving private harvest dumps in-tree.
 
 We route **query intent → graph policy** with a centroid router on weak
 evidence. **2-way learned target**; multi-hop narrowed regex. Instrument into
-**conversation JSON** first. Null-exit is **chunk-matched**: graph-on vs next
-pool slices (not empty tail) on **file-level recall**; exploratory knob sweep
-then retune-or-drop. Win = paired CI + 10 pp; majority check via CI lower bound.
+**conversation JSON** first. Null-exit is **per-query length-matched**: graph-on vs next pool slices with
+`pad_i` from final append fill (not fixed 10); report append-fill histogram;
+exploratory knob sweep then retune-or-drop. Win = paired CI + 10 pp; majority check via CI lower bound.
 Floors path ≻ abs OOD ≻ multi-hop; abort if abs floor suppresses multi-hop in
 first 200. Gold n≥60 file-level, author from index, no fixture DEF-017. No Hub
 until consent + evidence.
