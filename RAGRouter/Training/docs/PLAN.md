@@ -5,14 +5,13 @@
 **Owner:** Curia / Auspex-Aerie  
 **Code home:** `RAGRouter/Training/` (offline; not on the serving path)  
 **Runtime router:** `backend/rag/query_router.py`  
-**Related ledger:** `DIS-004`–`DIS-007`, `INC-008`, `DEC-036`–`DEC-038`, `DEF-016`–`DEF-017`, `HYP-003`, `HYP-004`  
+**Related ledger:** `DIS-004`–`DIS-008`, `INC-008`, `DEC-036`–`DEC-039`, `DEF-016`–`DEF-017`, `HYP-003`, `HYP-004`  
 **Also:** HYP-002, DEC-010, DEC-011, DIS-001, `docs/hf_hub.md`, `backend/rag/router_training.json`  
 **Rolling plan iteration with external reviewer:** [`handback.md`](handback.md) (zero body between passes; ledger/PLAN are durable)
 
-This document is the **full recipe** for external review. It absorbs a 2026-08-01
-read-only review (foundational cracks), handback pass-b (schema, abstain, power,
-null-exit), and pass-c optionals locked in `DEC-038` (win Δ, τ/δ, trace target).
-**Shipped** vs **planned** is marked explicitly.
+This document is the **full recipe** for external review. Pass-d amended
+`DEC-038` numbers (null-exit window, win CI/MDE, τ, multi-hop regex, precedence)
+via `DEC-039` / `DIS-008`. **Shipped** vs **planned** is marked explicitly.
 
 ---
 
@@ -158,7 +157,7 @@ floor” was technically wrong):
 
 | Mechanism | Detects | Default policy | When / knobs (`DEC-038`) |
 |-----------|---------|----------------|--------------------------|
-| **Absolute cosine floor** `max(cos) < τ` | OOD / off-manifold | **graph-off** | Log always; **policy effect off until enabled**. Provisional hard: **τ = 0.25** |
+| **Absolute cosine floor** `max(cos) < τ` | OOD / off-manifold | **graph-off** | Log always; **policy effect off until enabled**. Provisional hard: **τ = 0.12** (`DEC-039`) |
 | **Margin floor** `top1−top2 < δ` | Ambiguity *between* code classes | **1-hop (semantic)** | Log always; **policy effect off until enabled**. Provisional hard: **δ = 0.05** |
 | **`not_code_retrieval` class** | Learned OOD boundary | graph-off | After labeled negatives; subsumes absolute floor |
 
@@ -192,7 +191,7 @@ behavioral relevance ground truth and the **primary** justification for mining
 | **Input** | Natural-language user ask (Curia arena / short code-agent style) |
 | **Recording vocabulary** | 6 categories (keep for future policy splits; free to store) |
 | **Deployed policy space** | **3-way** (off / 1-hop / trace) — what retrieval consumes today |
-| **Learned train target** (`DEC-038`) | **2-way only:** graph-off vs 1-hop. **Trace stays regex** (`is_trace_query` / hybrid), not a learned class |
+| **Learned train target** (`DEC-038`/`039`) | **2-way only:** graph-off vs 1-hop. **Multi-hop stays narrowed regex** (not learned; not broad `where is`) |
 
 Verified `route_from_category` → 3 distinct policies:
 
@@ -428,8 +427,8 @@ Centroids force boundaries to perpendicular bisectors of class means; L2 logisti
 **strictly dominates** that geometry with the same encoder and tiny code, no Hub
 artifact required.
 
-**Trace:** stays on **regex / hybrid** (`is_trace_query`). **Not** in the learned
-target (`DEC-038`). Synthetic “trace the call chain for X” is keyword laundering.
+**Trace / multi-hop:** narrowed regex gate only (`DEC-039` D). **Not** in the
+learned target. Synthetic “trace the call chain for X” is keyword laundering.
 
 ### 7.3 Data gates before any train run
 
@@ -474,60 +473,88 @@ not flip or confirm DEC-011. Real holdout accrues from step 0 traffic.
 
 Deferred (`DEF-016`). Runtime may load a local logistic head without a public card.
 
-### 7.6 Pre-registered optionals (`DEC-038`) — locked 2026-08-02
+### 7.6 Pre-registered optionals (`DEC-038` as amended by `DEC-039`) — 2026-08-02
 
-These close the last open knobs before implementation. Challenge in handback;
-do not silently move after a powered run starts.
+Do not silently move after a powered run starts. Pass-d review fixed B/C/D
+numbers and the null-exit **window** (highest severity).
 
-#### A. HYP-003 win criteria (classification)
+#### A. HYP-003 win criteria (classification) — amended
 
 | Parameter | Pre-registered value |
 |-----------|----------------------|
-| Test | Two-sided **McNemar** on paired correct/incorrect (embedding vs regex), same items |
-| α (type I) | **0.05** |
-| Practical win Δ | Embedding **≥ +10 pp** absolute accuracy vs regex on the **same** 2-way (off/1-hop) labels **and** McNemar p &lt; 0.05 |
-| Must also beat | **Majority-class baseline** by ≥ **5 pp** (else “win” is class-skew theater) |
+| Primary gate | **95% CI of the paired accuracy difference** (embedding − regex) **excludes 0**, **and** point estimate ≥ **+10 pp** on the same 2-way labels |
+| Also report | McNemar p (informative); **minimum detectable effect (MDE)** at achieved n and observed discordance rate — publish in the results table |
+| Must also beat | **Majority-class baseline** by ≥ **5 pp** point estimate (same paired framing; note: at n=60 this is ~3 items — not independently powerful; keep as anti-skew theater, not a second powered test) |
 | Underpowered (n &lt; 60) | Report only; **may not** flip or confirm DEC-011 |
 | Directional claim | n ≥ **60** |
 | Effect-size claim | n ≥ **100** |
 | Tie / non-win | Keep embedding default; strike validation claim; rely on floors (`H3c` rule) |
 
-Rationale: reviewer cited ~20pp detectable at n~40–50; we require **10 pp + significance** so a noisy 3pp “win” cannot promote a train program, while 10pp is still reachable without demanding a miracle on a small set.
+**Why not “≥10 pp AND McNemar p&lt;0.05”:** at realistic discordance (~33% from HYP-002’s 6/18), MDE at n=60 is ~15–18 pp — so the 10 pp bar was **decorative** and misdescribed the real gate. CI-excludes-0 + point ≥10 pp + published MDE is honest.
 
-#### B. Downstream null-exit (graph on vs off) — `DEF-017` numbers
+#### B. Downstream null-exit (graph on vs off) — `DEF-017` / `DEC-039` (critical fix)
+
+**Defect in first lock (`DIS-008`):** `recall@k` with harness default **k = rerank_top_k = 10** only sees answer slots. Graph append lives at positions **11…** (`graph_append_slots`, default 10) and **never enters the window**. HYP-002 already showed six cells with **bit-identical** golden recall@10 while arms made **opposite** graph on/off decisions on 6/18 queries — same error class as circular purity (`DIS-005`): an insensitive metric that would fire null-exit on day one as an artifact.
 
 | Parameter | Pre-registered value |
 |-----------|----------------------|
-| Metric | Per-query **recall@k** (and nDCG@k if ranked gold exists) with graph forced **on** vs **off**, same queries, same seeds |
-| Test | Two-sided paired test on per-query deltas (Wilcoxon signed-rank default; paired t only if roughly normal) |
+| **k (pinned)** | **`context_chunk_cap` = `rerank_top_k` + `graph_append_slots`** (production defaults: **10 + 10 = 20**). State the integer used in every results row. Prefer scoring the **full injected context block** when that length differs. |
+| Primary metric | **nDCG@k** with k = cap (rank-sensitive; penalizes relevant material buried at position ~15) |
+| Secondary | **recall@k** at the **same** k=cap (not k=10) |
+| Cost report | **Token / chunk delta** (on − off): count of graph-appended chunks and approx tokens so the ≤10-tail-slot cost is in the decision |
+| Test | Two-sided paired test on per-query nDCG@cap deltas (Wilcoxon signed-rank default) |
 | α | **0.05** |
-| Practical significance | Mean Δ recall@k (on − off) ≥ **+0.05** (5 pp) |
-| Null-exit fires when | Not (significant **and** mean Δ ≥ 0.05) on a **powered** set (n ≥ 60 queries with gold) |
-| Effect of null-exit | **Drop** train/harvest-for-router steps 3–6 (`DEF-017`). Keep instrumentation, floors, Observatory, and **HYP-004** |
+| Practical significance | Mean Δ nDCG@cap (on − off) ≥ **+0.05** |
+| Null-exit fires when | Not (significant **and** mean Δ ≥ 0.05) on powered set (n ≥ 60 queries with gold) **using k=cap** |
+| Effect of null-exit | **Drop** train steps 3–6 (`DEF-017`). Keep instrumentation, floors, Observatory, **HYP-004** |
 
-Rationale: statistical significance alone can bless tiny deltas that do not justify labeling cost under DEC-010’s ≤10 tail-slot blast radius.
+**Forbidden as null-exit metric:** `recall@10` / any k ≤ `rerank_top_k` alone — structurally blind to graph append.
 
-#### C. Floor thresholds τ / δ
+#### C. Floor thresholds τ / δ — amended
 
 | Parameter | Pre-registered value |
 |-----------|----------------------|
 | Ship with step 0 | Always **log** `max_cos`, `margin`, `abs_floor_would_fire`, `margin_floor_would_fire` |
-| Policy effect default | **Off** (`ROUTER_ABS_FLOOR_ENABLED=false`, `ROUTER_MARGIN_FLOOR_ENABLED=false`) until enablement rule |
-| Provisional hard constants | **τ = 0.25**, **δ = 0.05** (normalized MiniLM cosines) |
-| Enablement | After ≥ **200** production embedding routes with `rag_used` or not: set τ to **~5th percentile of max(cos)** on human-tagged code-ish turns (or provisional 0.25 if unlabeled); set δ to **~25th percentile of margin** on turns that pass the abs floor; then flip enable flags under config |
-| Recalibrate | Allowed when `label_set_sha` or `encoder_id` changes; log old/new |
+| Policy effect default | **Off** until enablement rule is met |
+| Provisional hard τ | **0.12** (≈ measured p05 of max(cos) on small arena code-ish sample) — **not** 0.25 |
+| Provisional hard δ | **0.05** (still provisional; log-only until enablement) |
+| Enablement (all required) | (1) ≥ **200** production embedding routes logged; (2) hand-tagged code-ish vs OOD sample large enough to estimate; (3) **max_cos AUC ≥ ~0.80** on that sample as OOD detector; (4) then set τ from **~p05 of max(cos) on code-ish** (explicit **5% false-abstain budget on code turns**, not a detection spec) and δ from **~p25 of margin** on turns that pass abs floor |
+| Refuse early enable | If AUC &lt; 0.80 or sample too small — **leave policy off** even if provisional constants exist |
+| Recalibrate | On `label_set_sha` / `encoder_id` change; log old/new |
 
-Rationale: numbers without a histogram are guesses; logging-first avoids poisoning traffic. Provisional 0.25 / 0.05 are conservative starting hard values (rarely fire) if ops enable early.
+**Why not τ=0.25:** live centroid measurement (indicative n≈25/20): seed max_cos p05≈0.49, arena code-ish p05≈0.12 / p50≈0.26, non-code lower. τ=0.25 would fire on ~40% of code-ish arena queries — not “rarely.” max_cos AUC≈0.73 on that sample is weak; percentile alone does not guarantee detection quality.
 
-#### D. Trace in learned target
+#### D. Trace in learned target + **narrowed multi-hop regex** — amended
 
 | Parameter | Pre-registered value |
 |-----------|----------------------|
-| Decision | **Regex-only for multi-hop from day one** |
-| Learned classes | `{graph_off, one_hop}` only |
-| Trace mechanism | Existing `is_trace_query` / hybrid path; may still record `category=trace` in logs |
-| Synthetic trace for train | **Forbidden** (keyword laundering) |
-| Revisit | Only with a non-templated natural trace corpus large enough for its own gate (unlikely soon) |
+| Decision | **Regex-only multi-hop from day one**; learned classes `{graph_off, one_hop}` only |
+| Synthetic trace for train | **Forbidden** |
+| **Multi-hop gate pattern** | Narrowed: `\b(trace|call\s*chain|call\s*graph|data\s+flow\s+through)\b` — **drop** `how does` / `where is` / `who calls` from the **router multi-hop** path |
+| Naming | **Do not** reuse `hybrid.TRACE_RE` / `is_trace_query` for both jobs. Introduce a dedicated router multi-hop predicate (e.g. `is_multihop_trace_query`); leave hybrid’s broader pattern only if something else still needs it, under a **different** name/role |
+| Evidence | Current `is_trace_query` fires 7/24 seeds and **inverts 4 graph-OFF labels to multi-hop** (`where is … defined`, `how does …`) — the HYP-002 defect. Narrowed pattern: 1/24 seeds, 0 inversions |
+| Revisit | Non-templated natural multi-hop corpus only |
+
+#### E. Precedence of mechanisms (`DEC-039`) — must pin before implement
+
+Four (plus floors) mechanisms; order changes behavior. **Production resolve order:**
+
+```text
+1. Path override (≥2 explicit path mentions) → force graph-on 1-hop (cross_file),
+   wins over floors and learned/regex category.
+2. Multi-hop regex gate (narrowed pattern above) → force graph_trace + append
+   if matched (unless path override already set a policy — path still wins on
+   append; multi-hop may still set graph_trace only if product wants both —
+   default: path override fully replaces route, as today).
+3. Learned / centroid 2-way head (or current 6-way→route_from_category) →
+   graph_off vs one_hop (never emits multi-hop as a learned class).
+4. Absolute cosine floor (if enabled) → if max(cos) < τ → graph_off
+   (does not fire if path override already applied).
+5. Margin floor (if enabled) → if top1−top2 < δ → one_hop
+   (does not fire if path override or abs floor already forced graph_off).
+```
+
+**Stated default:** path override ≻ multi-hop regex ≻ model/centroid ≻ abs floor ≻ margin floor. Log which step decided (`decision_stage` in route event).
 
 ---
 
@@ -604,8 +631,9 @@ allowlisted (Curia first) pointer-only for trails / OOD — not bulk router gold
 | # | Work | Why first |
 |---|------|-----------|
 | **0** | **Instrument** full route schema (`DEC-037`) + Observatory; log even when RAG unused; state override precedence | Unblocks audit + holdout accrual; n≈19 makes this the **clock**, not just first task |
-| **0b** | Floors: log always; policy off until enablement; provisional τ=0.25, δ=0.05 (`DEC-038`) | OOD vs ambiguity separated |
-| **1** | **HYP-003** — McNemar + §7.6 win/null numbers; n≈19 descriptive only | Honest evidence; may **kill** later steps |
+| **0b** | Floors: log always; policy off; provisional τ=**0.12**, δ=0.05; AUC≥0.80 before enable (`DEC-039`) | OOD vs ambiguity; don’t false-abstain 40% of code |
+| **0c** | Narrow multi-hop regex; split from hybrid TRACE_RE; pin precedence (`DEC-039` E) | Stop re-adopting HYP-002 `where is` multi-hop defect |
+| **1** | **HYP-003** — CI/MDE win + **nDCG@cap** null-exit (k=20 default); never recall@10 alone | Honest evidence; may **kill** later steps |
 | **2** | **Fix metrics** — retire purity; score `_resolve_route`; 6-way diagnostic without fudge | Stop blessing unfailing metrics |
 | **3–6** | **2-way** learned target, floors/OOD, harvest re-aim, L2 logistic | **Only if** null-exit does not fire; else **drop** (`DEF-017`) |
 | **7** | Hub publish | `DEF-016` |
@@ -647,7 +675,7 @@ SupCon, shelf-driven Hub, archiving private harvest dumps in-tree.
 | PLAN pre-review / pass-a / pass-b | **This doc** |
 | Route log schema pin | **`DEC-037` — implement next** |
 | Abs + margin floors | **Planned (0b)**; thresholds in `DEC-038` |
-| Pre-registered win Δ / null-exit / trace target | **`DEC-038` locked** |
+| Pre-registered win Δ / null-exit / floors / trace / precedence | **`DEC-038` + `DEC-039` (B/C/D/E amended)** |
 | Honest holdout eval (HYP-003) | **Planned** (numbers in §7.6) |
 | Purity gate retirement / `_resolve_route` scoring | **Planned** |
 | Allowlist + pointer-only harvest | **Planned** (default-deny) |
@@ -675,11 +703,10 @@ SupCon, shelf-driven Hub, archiving private harvest dumps in-tree.
 ## 14. One-paragraph summary
 
 We route **query intent → graph/trace policy** with a **frozen MiniLM centroid
-router** promoted on **resubstitution** evidence that must be re-run honestly.
-Production is **3-way**; **learned target is 2-way** (trace stays regex). Route is
-not yet observable. **Instrument full schema first** (`DEC-037`), log floors with
-provisional **τ=0.25 / δ=0.05** (policy off until enablement), run HYP-003 under
-**pre-registered** McNemar (+10 pp @ α=0.05, majority +5 pp) and null-exit
-(mean Δ recall ≥ 5 pp @ α=0.05 or drop train — `DEF-017`/`DEC-038`). Then L2
-logistic only if the router still matters. Pointer-only, default-deny; delete
-private harvest after gitleaks; no Hub until consent + evidence.
+router** promoted on **resubstitution** evidence. Production is **3-way**;
+**learned target is 2-way**; multi-hop is a **narrowed regex** (not `where is`).
+**Instrument first** (`DEC-037`). Null-exit uses **nDCG@context_chunk_cap**
+(default k=**20**), never recall@10. Classification win: **95% CI of paired Δ
+excludes 0** and point ≥10 pp; publish MDE. Floors log-only until AUC≥0.80;
+provisional **τ=0.12**. Precedence pinned (`DEC-039` E). Drop train on null
+(`DEF-017`). No Hub until consent + evidence.
