@@ -22,60 +22,80 @@ reviewer (or next session) starts clean.
 
 | Item | Location |
 |------|----------|
-| Full recipe | [`PLAN.md`](PLAN.md) |
-| Short operator path | [`PIPELINE.md`](PIPELINE.md) |
-| Folder README | [`../README.md`](../README.md) |
+| Full recipe | [`PLAN.md`](PLAN.md) especially **§7.6** |
 | Decision ledger | [`../../../docs/decision_log.md`](../../../docs/decision_log.md) |
-| PR (plan branch) | https://github.com/Auspex-Aerie/curia/pull/34 |
+| PR | https://github.com/Auspex-Aerie/curia/pull/34 |
 | Branch | `docs/ragrouter-training-plan` |
 
 **Ledger for this arc:** `DIS-004`–`DIS-007`, `INC-008`, `HYP-003`, `HYP-004`,
-`DEC-036`, `DEC-037`, `DEF-016`, `DEF-017`.
+`DEC-036`–`DEC-038`, `DEF-016`, `DEF-017`.
 
 ---
 
 ## This pass
 
-**Pass id:** `2026-08-02-c`  
-**From:** implementer (post pass-b absorption)  
-**To:** reviewer  
-**PLAN revision:** pass-b absorbed; `DEC-037` / `DEF-017` / `DIS-007` filed  
-**Status:** ready if further challenge needed — else implementer proceeds to step 0 code
+**Pass id:** `2026-08-02-d`  
+**From:** implementer  
+**To:** reviewer — **final look at optionals, then plan iteration ends**  
+**Status:** optionals locked in `DEC-038` / PLAN §7.6; challenge numbers only
 
-### Absorbed from pass-b (summary)
+### What we locked (please challenge or LGTM)
 
-| Ask | Decision absorbed |
-|-----|-------------------|
-| 1 Step 0 payload | Full schema: all 6 cosines, router_mode, override_*, label_set_sha, encoder_id, query_tokens/truncated, rag_used; pin `DEC-037` |
-| 2 Abstain | Three mechanisms: abs cosine floor→graph-off; margin floor→1-hop; learned class later. Path override wins. |
-| 3 HYP-003 holdout | Arena-only ID holdout; synthetic=train; McNemar; n≈19 descriptive only; power n≥60/100; pre-register Δ |
-| 4 3-way scoring | Policy gates; majority baseline; per-policy recall; override rate; 6-way diagnostic no fudge |
-| 5 Harvest dump | gitleaks → act → **delete**; default-deny allowlist; Curia must-include on re-mine |
-| 6 Soft spots | Softened 0.31% (DIS-007); trace source risk; L2 for p≫n; **null-exit** DEF-017; pointer degraded policy; HYP-004 grep-bias; max_seq=config |
+#### 1. HYP-003 classification win
 
-Program order unchanged; step 0 is the clock.
+| Knob | Value |
+|------|-------|
+| Test | McNemar two-sided, paired, same items |
+| α | **0.05** |
+| Win Δ | Embedding **≥ +10 pp** vs regex **and** p&lt;0.05 |
+| Also | Beat majority baseline by **≥ 5 pp** |
+| Power | n&lt;60 descriptive only; n≥60 directional; n≥100 effect size |
+| Non-win | Keep embedding default; floors do safety |
 
-### What we want from you this pass (optional)
+#### 2. Null-exit (graph on vs off) — kills train steps 3–6
 
-Only if you still disagree. Otherwise silence = proceed to **implement DEC-037**.
+| Knob | Value |
+|------|-------|
+| α | **0.05** (paired per-query Δ recall@k) |
+| Practical floor | Mean Δ (on−off) ≥ **+0.05** |
+| Fires when | Not (sig **and** Δ≥0.05) on n≥60 with gold |
+| Survives null | Instrumentation, floors, Observatory, HYP-004 |
 
-1. Pre-register **win Δ** for McNemar (pp) and **α** for graph on/off null-exit?  
-2. Initial τ / δ: leave unset until production cosines exist, or propose a temporary constant?  
-3. Trace: **regex-only for learned target from day one**, or keep 3-way including trace until synthetic proof fails?
+#### 3. Floors τ / δ
 
-### Explicitly not asking
+| Knob | Value |
+|------|-------|
+| Log | Always (max_cos, margin, would-fire) |
+| Policy default | **Off** until enablement |
+| Provisional hard | **τ = 0.25**, **δ = 0.05** |
+| Enable after | ≥200 production embedding routes; prefer p05/p25 recalibration |
 
-- Code review of step 0 (not written yet)  
-- Hub / train job detail  
+#### 4. Trace learned target
+
+| Knob | Value |
+|------|-------|
+| Decision | **Regex-only multi-hop from day one** |
+| Learned classes | `{graph_off, one_hop}` only |
+| Synthetic trace train | **Forbidden** |
+
+### What we want from you this pass
+
+- **LGTM** on the table above, **or** counter-propose specific alternate numbers/rules (not open-ended redesign).
+- After this pass closes (absorb LGTM or agreed edits), **plan review iteration is done**; implementer implements `DEC-037` and moves on.
+
+### Explicitly not in scope
+
+- Re-opening pass-a/b foundations  
+- Implementation PR review  
+- Hub publish  
 
 ---
 
 ## Reviewer response
 
-<!-- Reviewer: write below. When implementer absorbs, zero this section
-     and This pass body; bump pass id. -->
+<!-- Reviewer: LGTM or alternate numbers only. -->
 
-_(empty — optional; silence ⇒ implementer implements DEC-037)_
+_(empty — your turn; last plan pass)_
 
 ---
 
@@ -83,8 +103,8 @@ _(empty — optional; silence ⇒ implementer implements DEC-037)_
 
 | Pass | Closed | Outcome |
 |------|--------|---------|
-| `2026-08-01-a` | 2026-08-01 | First external review → PLAN rewrite + `DEC-036` et al. |
-| `2026-08-01-b` | 2026-08-02 | Schema/abstain/HYP-003 power/null-exit → `DEC-037`, `DEF-017`, `DIS-007`; PLAN §7–10 revised |
+| `2026-08-01-a` | 2026-08-01 | First review → PLAN rewrite + `DEC-036` et al. |
+| `2026-08-01-b` | 2026-08-02 | Schema/abstain/power/null-exit → `DEC-037`, `DEF-017`, `DIS-007` |
+| `2026-08-02-c` | 2026-08-02 | Optionals filled by implementer → `DEC-038` / PLAN §7.6; this pass asks LGTM |
 
-<!-- When zeroing for a new reviewer-facing pass: clear "This pass" body and
-     "Reviewer response"; append one line to Closed passes; bump pass id. -->
+<!-- When zeroing: clear This pass + Reviewer response; append Closed line; bump id. -->
