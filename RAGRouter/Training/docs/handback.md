@@ -29,80 +29,44 @@ reviewer (or next session) starts clean.
 | PR (plan branch) | https://github.com/Auspex-Aerie/curia/pull/34 |
 | Branch | `docs/ragrouter-training-plan` |
 
-**Ledger already filed for this arc:** `DIS-004`–`DIS-006`, `INC-008`,
-`HYP-003`, `HYP-004`, `DEC-036`, `DEF-016`.
+**Ledger for this arc:** `DIS-004`–`DIS-007`, `INC-008`, `HYP-003`, `HYP-004`,
+`DEC-036`, `DEC-037`, `DEF-016`, `DEF-017`.
 
 ---
 
 ## This pass
 
-**Pass id:** `2026-08-01-b`  
-**From:** implementer (post first-review absorption)  
+**Pass id:** `2026-08-02-c`  
+**From:** implementer (post pass-b absorption)  
 **To:** reviewer  
-**PLAN revision:** post-review rewrite @ PR #34 commit `68a8a21`  
-**Status:** ready for second-look / iteration — not frozen
+**PLAN revision:** pass-b absorbed; `DEC-037` / `DEF-017` / `DIS-007` filed  
+**Status:** ready if further challenge needed — else implementer proceeds to step 0 code
 
-### What we did with your first review
+### Absorbed from pass-b (summary)
 
-Accepted the verdict. Rewrote `PLAN.md` and logged the foundational cracks.
-Did **not** start mining, train, or Hub publish. `DEC-011` production default
-left in place pending `HYP-003`.
+| Ask | Decision absorbed |
+|-----|-------------------|
+| 1 Step 0 payload | Full schema: all 6 cosines, router_mode, override_*, label_set_sha, encoder_id, query_tokens/truncated, rag_used; pin `DEC-037` |
+| 2 Abstain | Three mechanisms: abs cosine floor→graph-off; margin floor→1-hop; learned class later. Path override wins. |
+| 3 HYP-003 holdout | Arena-only ID holdout; synthetic=train; McNemar; n≈19 descriptive only; power n≥60/100; pre-register Δ |
+| 4 3-way scoring | Policy gates; majority baseline; per-policy recall; override rate; 6-way diagnostic no fudge |
+| 5 Harvest dump | gitleaks → act → **delete**; default-deny allowlist; Curia must-include on re-mine |
+| 6 Soft spots | Softened 0.31% (DIS-007); trace source risk; L2 for p≫n; **null-exit** DEF-017; pointer degraded policy; HYP-004 grep-bias; max_seq=config |
 
-| Your point | Where it landed |
-|------------|-----------------|
-| Train-on-test leak (seed ≡ eval n=24) | `DIS-004`, `INC-008`; PLAN §2.1 |
-| Circular `answer_slot_purity` | `DIS-005`; purity retired as gate |
-| Silent pattern↔semantic fudge; bare `route_fn` | `INC-008`; PLAN §2.1 / §7.4 |
-| 6-class → 3-way policy | PLAN §3; train/gate on 3-way; 6-way = recording vocab |
-| Harvest ~0.3% usable short asks | `DIS-006`; §8 re-read; not a filter bug |
-| MiniLM 256 truncation + Stage-B non-triage | PLAN §2.3 |
-| Missing abstain / OOD | PLAN §2.4, §10 step 4 |
-| Route not instrumented | PLAN §2.5, §10 **step 0** first |
-| Privacy: allowlist + pointer-only (no blobs) | PLAN §5; default storage mode flipped |
-| LoRA wrong for MiniLM; ladder confused | PLAN §7.2 → logistic probe first |
-| Effort vs DIS-001 | Parallel `HYP-004` (files-read trails) |
-| §11 answers | PLAN §11 recorded table |
-| Re-ordered §10 | PLAN §10 matches your 0–6 + parallel HYP-004 |
+Program order unchanged; step 0 is the clock.
 
-### Current program order (PLAN §10 — for challenge)
+### What we want from you this pass (optional)
 
-0. Instrument route → retrieval event + Observatory  
-1. Decontaminate eval (`HYP-003`)  
-2. Fix metrics (`_resolve_route`; kill purity gate / silent fudge)  
-3. 3-way train/gate target  
-4. Abstain (margin floor or 7th class)  
-5. Re-aim harvest (allowlist, pointer-only, synthetic short queries)  
-6. Fit logistic probe only if gates pass; Hub deferred (`DEF-016`)  
-∥ `HYP-004` → DIS-001 rerank/index  
+Only if you still disagree. Otherwise silence = proceed to **implement DEC-037**.
 
-### What we want from you this pass
+1. Pre-register **win Δ** for McNemar (pp) and **α** for graph on/off null-exit?  
+2. Initial τ / δ: leave unset until production cosines exist, or propose a temporary constant?  
+3. Trace: **regex-only for learned target from day one**, or keep 3-way including trace until synthetic proof fails?
 
-Challenge, tighten, or re-order. Concrete asks:
+### Explicitly not asking
 
-1. **Step 0 payload** — Is `{category, use_graph_append, graph_trace, graph_seed_k, top2_cosine, margin}` enough for Observatory + later labels, or do you want encoder id / prototype version / path-override flag from `_resolve_route` on day one?
-
-2. **Abstain semantics** — Prefer **margin floor → safe default** (which default: graph-off? semantic 1-hop?) vs explicit **`not_code_retrieval` class** in the 6-way vocab? Or both?
-
-3. **HYP-003 holdout construction** — Source of short queries with zero seed overlap: Curia arena only, synthetic-from-indexed-symbols, hand-write, or mix? Minimum n before you trust a re-measure of DEC-011?
-
-4. **3-way scoring** — When we remove the pattern↔semantic fudge, should evaluation *only* report policy accuracy (off / 1-hop / trace), with 6-way confusion as diagnostic only?
-
-5. **Existing ~38 MB harvest on disk** — gitleaks + quarantine in place, leave as dead archive, or delete after allowlist decision? Any **must-include** projects if we ever re-mine?
-
-6. **Anything in PLAN still wrong or soft** after absorption? Quote section numbers.
-
-### Explicitly not asking yet
-
-- Implementation PRs for steps 0–6  
-- Train job design detail  
-- Hub card / publish path  
-- Full HYP-004 experiment matrix beyond the stub in the ledger  
-
-### Implementer notes / constraints
-
-- Local harvest remains gitignored (verified earlier).  
-- Unrelated dirty tree files (`data/model_catalog.yaml`, mock PNGs, etc.) are **not** part of this PR.  
-- Next code work after this pass closes: **step 0 instrumentation** unless you re-order.
+- Code review of step 0 (not written yet)  
+- Hub / train job detail  
 
 ---
 
@@ -111,7 +75,7 @@ Challenge, tighten, or re-order. Concrete asks:
 <!-- Reviewer: write below. When implementer absorbs, zero this section
      and This pass body; bump pass id. -->
 
-_(empty — your turn)_
+_(empty — optional; silence ⇒ implementer implements DEC-037)_
 
 ---
 
@@ -119,7 +83,8 @@ _(empty — your turn)_
 
 | Pass | Closed | Outcome |
 |------|--------|---------|
-| `2026-08-01-a` | 2026-08-01 | First external review absorbed → PLAN rewrite + `DEC-036` et al. Detail lives in PLAN/ledger, not here. |
+| `2026-08-01-a` | 2026-08-01 | First external review → PLAN rewrite + `DEC-036` et al. |
+| `2026-08-01-b` | 2026-08-02 | Schema/abstain/HYP-003 power/null-exit → `DEC-037`, `DEF-017`, `DIS-007`; PLAN §7–10 revised |
 
 <!-- When zeroing for a new reviewer-facing pass: clear "This pass" body and
      "Reviewer response"; append one line to Closed passes; bump pass id. -->

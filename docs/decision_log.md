@@ -606,3 +606,24 @@ _(pending)_
 - **decision:** Do not publish a trained `curia-router` (or equivalent) to Hugging Face for shelf-completeness. Config/labels mirrors already published may remain. Runtime may load a local logistic head / FT artifact without a public card.
 - **rationale:** No generalization evidence yet; data consent for any train corpus is unresolved; MiniLM full FT does not require a Hub adapter story. Public weights need a separate consent and eval review.
 - **revisit_when:** (a) `HYP-003` shows a clear held-out win with pre-registered effect size, **and** (b) train corpus is allowlisted/public-safe, **and** (c) explicit product decision to publish weights.
+
+### DIS-007: Harvest “0.31% usable” is an order-of-magnitude estimate, not an exact count
+- **date:** 2026-08-02 · **status:** observed · **triggered_by:** handback pass `2026-08-01-b` reviewer correction of `DIS-006` presentation · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` · **related:** `DIS-006`
+- **finding:** The ~18 / 0.31% short retrieval-shaped figure was one reviewer filter over one definition on one dump. Rendering it as a bold exact measurement over-hardens a reviewer estimate into ledger fact.
+- **implication:** Keep the conclusion (usable router-label yield is OOM tiny; agent chat is wrong register). Cite as order-of-magnitude under a stated filter, not an exact count. `DIS-006` core finding stands.
+
+### DEC-037: Persist full query-route decision on every retrieval-relevant turn
+- **date:** 2026-08-02 · **status:** accepted · **triggered_by:** handback pass-b; `DEC-036` step 0; CLAUDE.md storage/observability contracts · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §8.1 · **related:** `DEC-036`, `DEC-025`, `DEC-028`, `HYP-003`
+- **decision:** Before further mining/train work, implement a versioned **route decision** record (retrieval event + Observatory) with at least: `category`; policy flags (`use_graph_append`, `graph_trace`, `graph_seed_k`); `router_mode` (`embedding`|`regex`); `encoder_id`; `label_set_sha` (`sha256(router_training.json)[:12]`); **all six** class cosines (when embedding path); `query_tokens` + `truncated`; `override_fired` + `override_reason`; `rag_used` (log even when RAG skipped / manual / unindexed). State precedence: **path override wins over abstain floors**. Ship absolute cosine floor (OOD→graph-off) and margin floor (ambiguity→1-hop) as separate mechanisms once cosines are logged; τ/δ calibrated from production.
+- **rationale:** Missing fields are not backfillable. Silent regex fallback and path override poison labels if unlogged. Survivorship bias if only RAG-on turns are recorded. Two floors detect different failures (manifold vs inter-class).
+- **impact:** Schema is a persisted contract — implement next. Unblocks honest production holdout accrual (HYP-003 clock). Does not reverse `DEC-011`.
+
+### DEF-017: Drop (not defer) router train steps 3–6 if graph on/off has no significant downstream effect
+- **date:** 2026-08-02 · **status:** active · **triggered_by:** handback pass-b null-exit requirement for `HYP-003` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.4 / §10 · **related:** `HYP-003`, `DEC-036`, `DEC-010`
+- **decision:** Pre-register: if HYP-003 graph forced on vs off recall/nDCG difference is **not significant** on the powered holdout, **remove** train/harvest-for-router steps 3–6 from the board (null result: router barely matters under DEC-010 blast radius). Do not keep a permanent “later” branch that invents reasons to continue. Instrumentation + floors + Observatory remain valuable regardless.
+- **rationale:** Bounded blast radius (≤10 tail slots) makes “router not worth a labeling program” a live, cheap outcome. Without a pre-registered exit, runs will always find a reason to fit a model.
+- **revisit_when:** Only if product changes graph blast radius (e.g. graph re-sort returns) or new evidence shows large on/off quality gaps on real traffic.
+
+### HYP-003 (amendment note — append results constraints)
+- **date:** 2026-08-02 · **status:** open · **triggered_by:** handback pass-b · **related:** `DEC-037`, `DEF-017`
+- **Results constraints (pre-run):** Holdout = Curia arena only for ID; synthetic = train never holdout; label **policy** not 6-way; McNemar paired; majority-class baseline required; per-policy recall; override-fire rate. n≈19 today = descriptive + CI only — must not flip/confirm DEC-011. Power targets: ~40–50 for ~20pp gap; n≥60 directional; n≥100 effect size. **Pre-register win Δ before first powered run** (fill number in Results when chosen). H3c on tie: keep embedding, strike validation claim, rely on floors. Null-exit → `DEF-017`.
