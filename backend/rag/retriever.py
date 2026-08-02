@@ -389,27 +389,73 @@ class CodeRetriever:
         ranked = self._dedupe_parent_content(ranked)
         return apply_ast_aware_cap(ranked, self.context_chunk_cap)
 
+    def retrieve_matched_arms(
+        self, query: str
+    ) -> Tuple[List[Tuple[CodeChunk, float]], List[Tuple[CodeChunk, float]]]:
+        """Graph-on + length-matched padded control from one pre-graph ranking (S9/DEC-042)."""
+        from .pre_cap import apply_ast_aware_cap
+        from .route_decision import pad_for_matched_control
+
+        route = self._resolve_route(query)
+        # Full pool ranking once; diversify at max needed so pad slice is not truncated.
+        max_div = self.rerank_top_k + self.config.graph_append_slots
+        pre_full = self.retrieve_post_rerank_pre_graph(
+            query,
+            top_k=max_div,
+            diversify_k=max_div,
+        )
+        # Treatment: answer slots then graph (same as retrieve_ranked)
+        answer = pre_full[: self.rerank_top_k]
+        graph_on = self._expand_graph(answer, query, route)
+        graph_on = self._dedupe_parent_content(graph_on)
+        graph_on = apply_ast_aware_cap(graph_on, self.context_chunk_cap)
+
+        pad_i = pad_for_matched_control(len(graph_on), self.rerank_top_k)
+        target_len = self.rerank_top_k + pad_i
+        control = list(pre_full[:target_len])
+        control = self._dedupe_parent_content(control)
+        control = apply_ast_aware_cap(control, min(self.context_chunk_cap, target_len))
+
+        if len(control) != len(graph_on):
+            raise AssertionError(
+                f"DEC-042 length match failed: control {len(control)} != treatment {len(graph_on)} "
+                f"(pad_i={pad_i}, rerank_top_k={self.rerank_top_k})"
+            )
+        return graph_on, control
+
     def retrieve_padded_control(
         self,
         query: str,
         *,
         graph_on: Optional[List[Tuple[CodeChunk, float]]] = None,
+        pre_graph: Optional[List[Tuple[CodeChunk, float]]] = None,
     ) -> List[Tuple[CodeChunk, float]]:
-        """DEC-042 chunk-matched control: next pool slices, pad from final graph-on length."""
+        """DEC-042 chunk-matched control. Prefer retrieve_matched_arms to avoid double retrieve."""
         from .pre_cap import apply_ast_aware_cap
         from .route_decision import pad_for_matched_control
+
+        if graph_on is None and pre_graph is None:
+            _on, control = self.retrieve_matched_arms(query)
+            return control
 
         on = graph_on if graph_on is not None else self.retrieve_ranked(query)
         pad_i = pad_for_matched_control(len(on), self.rerank_top_k)
         target_len = self.rerank_top_k + pad_i
-        pre = self.retrieve_post_rerank_pre_graph(
-            query,
-            top_k=target_len,
-            diversify_k=target_len,
-        )
-        # No graph expand; match production post-processing length cap
+        if pre_graph is not None:
+            pre = list(pre_graph[:target_len])
+        else:
+            pre = self.retrieve_post_rerank_pre_graph(
+                query,
+                top_k=target_len,
+                diversify_k=target_len,
+            )
         pre = self._dedupe_parent_content(pre)
-        return apply_ast_aware_cap(pre, min(self.context_chunk_cap, target_len))
+        result = apply_ast_aware_cap(pre, min(self.context_chunk_cap, target_len))
+        if len(result) != len(on):
+            raise AssertionError(
+                f"DEC-042 length match failed: control {len(result)} != treatment {len(on)}"
+            )
+        return result
 
     def retrieve(self, query: str) -> Tuple[str, List[dict], float]:
         start = time.monotonic()

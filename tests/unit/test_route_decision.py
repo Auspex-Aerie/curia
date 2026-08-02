@@ -45,16 +45,45 @@ class TestPrecedence:
         assert d.override_reason == "multi_path"
         assert d.decision_stage == "path_override"
 
+    def test_path_plus_multihop_composes(self):
+        """S2: path forces graph on; multi-hop keeps graph_trace (orthogonal flags)."""
+        q = "trace the call chain from backend/arena.py into backend/run_turn.py"
+        d = resolve_route_decision(
+            q,
+            route_fn=lambda _: route_from_category("architectural"),
+            abs_floor_enabled=False,
+            margin_floor_enabled=False,
+        )
+        assert d.use_graph_append is True
+        assert d.graph_trace is True
+        assert d.override_fired is True
+        assert d.decision_stage == "path_override+multi_hop"
+        assert d.category == "trace"
+
     def test_abs_floor_applied_blocks_multihop(self):
+        cos = {
+            "symbol_lookup": 0.05,
+            "trace": 0.04,
+            "cross_file": 0.03,
+            "semantic": 0.02,
+            "pattern": 0.01,
+            "architectural": 0.06,
+        }
         d = resolve_route_decision(
             "trace call chain of jazz history",
             route_fn=lambda _: route_from_category("semantic"),
             abs_floor_enabled=True,
-            tau=1.0,  # always fire if cosines present; inject empty → no fire
+            tau=0.12,
+            cosines=cos,
             margin_floor_enabled=False,
         )
-        # Without cosines, abs floor cannot fire (max_cos is None)
-        assert d.abs_floor_would_fire is False
+        assert d.abs_floor_would_fire is True
+        assert d.abs_floor_applied is True
+        assert d.use_graph_append is False
+        assert d.graph_trace is False
+        assert d.category == "ood_graph_off"
+        assert d.multi_hop_suppressed_by_abs_floor is True
+        assert d.decision_stage == "abs_floor"
 
     def test_multihop_stage_when_on_manifold(self):
         d = resolve_route_decision(
@@ -76,6 +105,7 @@ class TestPrecedence:
         )
         assert d.rag_used is False
         assert d.to_dict()["schema_version"] == 1
+        assert d.split_id.startswith("calibration:") or d.split_id.startswith("holdout:")
 
 
 class TestPadMatch:

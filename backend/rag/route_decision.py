@@ -52,14 +52,47 @@ def label_set_sha(path: Optional[Path] = None) -> str:
     return hashlib.sha256(data).hexdigest()[:12]
 
 
-def estimate_query_tokens(query: str) -> Tuple[int, bool]:
-    """Best-effort token count vs MiniLM max_seq_length=256 (no model load)."""
+def estimate_query_tokens(
+    query: str,
+    *,
+    embedder: Any = None,
+) -> Tuple[int, bool]:
+    """Token count vs MiniLM max_seq_length=256.
+
+    Prefer the real tokenizer when an embedding router is already loaded (S5);
+    char heuristic only for regex/injected paths without a model.
+    """
     max_seq = 256
     if not query:
         return 0, False
-    # WordPiece ≈ 1 token / ~4 chars for English; conservative for truncation flag.
+    if embedder is not None:
+        try:
+            tok = getattr(embedder, "tokenizer", None) or getattr(
+                getattr(embedder, "_first_module", lambda: None)(), "tokenizer", None
+            )
+            # sentence-transformers: model.tokenize(query)
+            if hasattr(embedder, "tokenize"):
+                feats = embedder.tokenize([query])
+                ids = feats.get("input_ids")
+                if ids is not None:
+                    n = int(ids.shape[-1]) if hasattr(ids, "shape") else len(ids[0])
+                    return n, n > max_seq
+            if tok is not None and hasattr(tok, "encode"):
+                n = len(tok.encode(query, add_special_tokens=True))
+                return n, n > max_seq
+        except Exception:
+            logger.debug("tokenizer estimate failed; char heuristic", exc_info=True)
     n = max(1, (len(query) + 3) // 4)
     return n, n > max_seq
+
+
+def derive_split_id(conversation_id: Optional[str], query: str) -> str:
+    """Stable calib/holdout bucket without a global env partition (DEC-040 §4 / S6)."""
+    seed = (conversation_id or "").strip() or f"query:{query}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    # 80/20 calib/holdout by first nibble
+    bucket = "holdout" if int(digest[:2], 16) < 51 else "calibration"
+    return f"{bucket}:{digest[:12]}"
 
 @dataclass
 class RouteDecision:
@@ -121,9 +154,15 @@ def resolve_route_decision(
     tau: Optional[float] = None,
     delta: Optional[float] = None,
     split_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    cosines: Optional[Dict[str, float]] = None,
     use_query_router: bool = True,
 ) -> RouteDecision:
-    """Resolve production route with full precedence and telemetry fields."""
+    """Resolve production route with full precedence and telemetry fields.
+
+    Policy flags compose (S2): path forces graph *on*; multi-hop sets hop *depth*
+    independently — they are not competing categories.
+    """
     from ..config import QUERY_ROUTER, ROUTER_EMBED_MODEL
 
     abs_enabled = (
@@ -138,9 +177,13 @@ def resolve_route_decision(
     )
     tau_v = tau if tau is not None else _env_float("ROUTER_ABS_COSINE_TAU", 0.12)
     delta_v = delta if delta is not None else _env_float("ROUTER_MARGIN_DELTA", 0.05)
-    split = split_id if split_id is not None else os.getenv("ROUTER_SPLIT_ID", "unset")
+    if split_id is not None:
+        split = split_id
+    elif os.getenv("ROUTER_SPLIT_ID"):
+        split = os.environ["ROUTER_SPLIT_ID"]
+    else:
+        split = derive_split_id(conversation_id, query)
 
-    q_tokens, truncated = estimate_query_tokens(query)
     paths = extract_path_mentions(query)
     n_paths = len(paths)
 
@@ -149,11 +192,12 @@ def resolve_route_decision(
     except OSError:
         sha = ""
 
-    cosines: Dict[str, float] = {}
+    score_map: Dict[str, float] = dict(cosines or {})
     router_mode = "regex"
     encoder_id: Optional[str] = None
     base_category = "semantic"
     base_route: QueryRoute
+    embedder_for_tokens: Any = None
 
     if not use_query_router:
         multihop = is_multihop_trace_query(query)
@@ -161,7 +205,6 @@ def resolve_route_decision(
         base_category = base_route.category
         decision_stage = "config_default"
     elif route_fn is not None:
-        # Injected route_fn (tests / eval): use it as the model stage only.
         base_route = route_fn(query)
         base_category = base_route.category
         router_mode = "injected"
@@ -176,11 +219,17 @@ def resolve_route_decision(
         else:
             try:
                 emb = get_embedding_router()
+                embedder_for_tokens = getattr(emb, "_encode_fn", None)
+                # Prefer underlying SentenceTransformer if present
+                from .query_router import _EMBED_MODEL
+
+                if _EMBED_MODEL is not None:
+                    embedder_for_tokens = _EMBED_MODEL
                 category, scores = emb.classify(query)
-                cosines = {c: float(scores.get(c, 0.0)) for c in ROUTER_CATEGORIES}
-                # fill missing cats with 0
+                if not score_map:
+                    score_map = {c: float(scores.get(c, 0.0)) for c in ROUTER_CATEGORIES}
                 for c in ROUTER_CATEGORIES:
-                    cosines.setdefault(c, 0.0)
+                    score_map.setdefault(c, 0.0)
                 base_route = route_from_category(category)
                 base_category = category
                 router_mode = "embedding"
@@ -193,11 +242,12 @@ def resolve_route_decision(
                 base_category = base_route.category
                 decision_stage = "model"
 
-    max_cos, margin = _sorted_margin(cosines)
+    q_tokens, truncated = estimate_query_tokens(query, embedder=embedder_for_tokens)
+
+    max_cos, margin = _sorted_margin(score_map)
     abs_would = bool(max_cos is not None and tau_v is not None and max_cos < tau_v)
     margin_would = bool(margin is not None and delta_v is not None and margin < delta_v)
 
-    # Start from model/centroid/regex category
     category = base_category
     use_graph = base_route.use_graph_append
     graph_trace = base_route.graph_trace
@@ -208,71 +258,65 @@ def resolve_route_decision(
     margin_applied = False
     multi_hop_suppressed = False
     stage = decision_stage
-
-    # 1. Path override
-    if n_paths >= 2 and not use_graph:
-        use_graph = True
-        graph_trace = False
-        seed_k = 3
-        category = "cross_file"
-        override_fired = True
-        override_reason = "multi_path"
-        stage = "path_override"
-    elif n_paths >= 2 and use_graph:
-        # Still record path strength even if model already graph-on
-        override_fired = True
-        override_reason = "multi_path"
-        stage = "path_override"
-        if graph_trace:
-            graph_trace = False  # path wins: 1-hop cross_file not multi-hop
-            category = "cross_file"
-
-    # 2. Abs cosine floor (only if not path-forced graph-on for multi_path when we want OOD off)
-    # Path override wins over floors. If path override fired, skip floors for policy.
-    path_locked = override_reason == "multi_path" and n_paths >= 2
-
     multihop_match = is_multihop_trace_query(query)
 
-    if not path_locked:
-        if abs_would:
-            if abs_enabled:
-                use_graph = False
-                graph_trace = False
-                seed_k = 0
-                category = "architectural"  # graph-off bucket
-                abs_applied = True
-                stage = "abs_floor"
-                if multihop_match:
-                    multi_hop_suppressed = True
-            # else: would_fire only
-
-        # 3. Multi-hop regex (after abs floor; skipped if abs applied)
-        if multihop_match and not abs_applied:
+    # 1. Path override — force graph ON only; do not clear multi-hop depth (S2).
+    if n_paths >= 2:
+        if not use_graph:
             use_graph = True
-            graph_trace = True
-            seed_k = 3
+            seed_k = max(seed_k, 3)
+            if category in {"symbol_lookup", "architectural", "ood_graph_off"}:
+                category = "cross_file"
+        override_fired = True
+        override_reason = "multi_path"
+        stage = "path_override"
+
+    # 2. Abs cosine floor — OOD veto (skipped when path override already applied:
+    #    explicit paths are repo-grounded evidence stronger than manifold distance).
+    path_locked = bool(override_reason == "multi_path")
+
+    if not path_locked and abs_would:
+        if abs_enabled:
+            use_graph = False
+            graph_trace = False
+            seed_k = 0
+            category = "ood_graph_off"  # distinct from architectural (S7)
+            abs_applied = True
+            stage = "abs_floor"
+            if multihop_match:
+                multi_hop_suppressed = True
+
+    # 3. Multi-hop regex — hop *depth*, orthogonal to path-forced append (S2).
+    if multihop_match and not abs_applied:
+        use_graph = True
+        graph_trace = True
+        seed_k = max(seed_k, 3)
+        if not path_locked:
             category = "trace"
             stage = "multi_hop_regex"
-        elif multihop_match and abs_applied:
-            multi_hop_suppressed = True
+        else:
+            # Paths + multi-hop: keep path stage, preserve graph_trace=True
+            category = "trace"
+            stage = "path_override+multi_hop"
+    elif multihop_match and abs_applied:
+        multi_hop_suppressed = True
 
-        # 4. Model stage already applied as base (unless overridden above)
+    # 4. Model base already applied.
 
-        # 5. Margin floor — ambiguity → 1-hop; never overrides path or abs floor
-        if (
-            margin_would
-            and margin_enabled
-            and not abs_applied
-            and stage not in {"path_override"}
-        ):
-            # Force one_hop: graph on, not trace
-            use_graph = True
-            graph_trace = False
-            seed_k = 3
-            if category in {"symbol_lookup", "architectural", "trace"}:
-                category = "semantic"
-            margin_applied = True
-            stage = "margin_floor"
+    # 5. Margin floor — inter-class ambiguity → 1-hop; never overrides path or abs.
+    if (
+        margin_would
+        and margin_enabled
+        and not abs_applied
+        and not path_locked
+    ):
+        use_graph = True
+        graph_trace = False
+        seed_k = max(seed_k, 3)
+        if category in {"symbol_lookup", "architectural", "trace", "ood_graph_off"}:
+            category = "semantic"
+        margin_applied = True
+        stage = "margin_floor"
 
     return RouteDecision(
         category=category,
@@ -282,7 +326,7 @@ def resolve_route_decision(
         router_mode=router_mode,
         encoder_id=encoder_id,
         label_set_sha=sha,
-        cosines=cosines,
+        cosines=score_map,
         margin=margin,
         max_cos=max_cos,
         query_tokens=q_tokens,

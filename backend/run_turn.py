@@ -387,7 +387,7 @@ async def run_turn(
                 arena_models=arena_models,
                 chairman_model=chairman_model,
             ),
-            route_decision=ctx.route_decision,
+            route_decision=getattr(ctx, "route_decision", None),
             caller=caller,
             origin=origin,
         )
@@ -396,6 +396,6 @@ async def run_turn(
         response_dict=response_dict,
         execution=execution,
         context_sources=ctx.context_sources,
-        route_decision=ctx.route_decision,
+        route_decision=getattr(ctx, "route_decision", None),
         title_task=title_task,
     )
