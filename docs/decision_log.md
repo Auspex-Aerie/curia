@@ -660,7 +660,7 @@ _(pending)_
 - **implication:** Score **all chunks from `retrieve_ranked`**; read live config at eval; **assert** `k_eff > rerank_top_k` on graph-on queries. Never restate the harness identity as production truth.
 
 ### DEC-040: Amend null-exit metric, precedence, gold path, route persistence (pass-e)
-- **date:** 2026-08-02 · **status:** accepted · **triggered_by:** handback pass-e C1–C7; `DIS-009`; critical implementer review of reviewer counters · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6 · **related:** `DEC-037`, `DEC-039` (supersedes k/nDCG/precedence cells), `DEF-017`, `HYP-003`
+- **date:** 2026-08-02 · **status:** superseded in part by `DEC-041` (null-exit control arm + PB closures) · **triggered_by:** handback pass-e C1–C7; `DIS-009`; critical implementer review of reviewer counters · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6 · **related:** `DEC-037`, `DEC-039` (supersedes k/nDCG/precedence cells), `DEF-017`, `HYP-003`
 - **decision:**
   1. **Null-exit window:** score full `retrieve_ranked` output; report `k_eff` and `(rerank_top_k, graph_append_slots, context_chunk_cap)` from live config; harness **assert** graph-on ⇒ `k_eff > rerank_top_k`. **Primary = recall@k_eff**; mandatory **Δchunks / Δtokens / Δrecall per token**; **nDCG demoted to diagnostic** (log-discount biases toward null-exit on tail append). Forbidden: k≤answer slots; false cap=rerank+append identity.
   2. **Win CI method:** bootstrap on paired differences or McNemar/exact CI — not two-proportion z.
@@ -671,3 +671,16 @@ _(pending)_
   7. **Persistence:** route decision in **conversation JSON** as sibling of `context_sources` on assistant message; SQLite is projection only; log when `rag_used=false`.
 - **rationale:** C1 verified in config. C2 self-correction accepted with cost guard (recall alone is weakly length-biased). C3–C7 close real leakage, confounding, schedule, and canonical-store gaps. Implementer did not rubber-stamp: nDCG not kept as primary; sweep is bounded; gold cost made explicit.
 - **impact:** PLAN §7.6 / §10 rewritten. Do not implement DEC-039 k=20 or nDCG-primary null-exit.
+
+### DEC-041: Close pass-f pushbacks — chunk-matched null-exit and residual gates
+- **date:** 2026-08-02 · **status:** accepted · **triggered_by:** handback pass-f PB1–PB7 reviewer answers; code verify of `retrieve_post_rerank_pre_graph` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6, `RAGRouter/Training/docs/handback.md` · **related:** `DEC-040`, `DEF-017`, `HYP-003`, `DIS-008`, `DIS-009`
+- **decision:**
+  1. **PB1 null-exit control = chunk-matched (C):** graph-on vs **padded graph-off** taking the next `graph_append_slots` from the same full-pool rerank list (`ranked[:k+pad]`). Not bare empty tail (A); not Δrecall/Δtokens ≥ X (B — unnameable, unstable). Primary = **file-level recall** at matched length; Δrecall ≥ 0.05; α=0.05. Harness must pass **k+pad** into `_select_source_diverse` when path mentions exist. Bias disclosure: C is stricter / more null-exit-prone than A.
+  2. **PB2:** W2 — product DEC required to continue train if below gate; rare under matched budgets.
+  3. **PB3:** Retune-first; 9-cell sweep labeled **exploratory** only; re-null under new defaults before any train.
+  4. **PB4:** Multi-hop retire only if gold `needs_multi_hop` 0/60 (rule of three) **and** ≥200-turn fire rate **and** FN sample ~30 clean.
+  5. **PB5:** File-level gold v1 (mechanism-better, not just cheaper); no fixture-only DEF-017; ~40 queries authored from index with author/date/split_id; HYP-004 trails diagnostic only.
+  6. **PB6:** E1+E3; if `multi_hop_suppressed_by_abs_floor > 0` in first 200 enabled turns → abort hard E1, revisit τ/precedence.
+  7. **PB7:** Majority check = paired CI **lower bound** exceeds majority point estimate; report-only, not DEF-017/DEC-011 flip.
+- **rationale:** Verified padded arm is a slice of already-ranked pool (not a heavy second retrieval). Counterfactual matches product question “are graph neighbors better than the next pool chunks?” Rejected unnameable cost ratio. Remaining PB answers were implementer defaults or tightenings.
+- **impact:** PLAN §7.6 B/D/E/F/G/H current. Implement null-exit harness with pad + diverse-select fix; do not implement bare graph-off-only primary.
