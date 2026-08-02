@@ -5,13 +5,14 @@
 **Owner:** Curia / Auspex-Aerie  
 **Code home:** `RAGRouter/Training/` (offline; not on the serving path)  
 **Runtime router:** `backend/rag/query_router.py`  
-**Related ledger:** `DIS-004`–`DIS-008`, `INC-008`, `DEC-036`–`DEC-039`, `DEF-016`–`DEF-017`, `HYP-003`, `HYP-004`  
+**Related ledger:** `DIS-004`–`DIS-009`, `INC-008`, `DEC-036`–`DEC-040`, `DEF-016`–`DEF-017`, `HYP-003`, `HYP-004`  
 **Also:** HYP-002, DEC-010, DEC-011, DIS-001, `docs/hf_hub.md`, `backend/rag/router_training.json`  
 **Rolling plan iteration with external reviewer:** [`handback.md`](handback.md) (zero body between passes; ledger/PLAN are durable)
 
-This document is the **full recipe** for external review. Pass-d amended
-`DEC-038` numbers (null-exit window, win CI/MDE, τ, multi-hop regex, precedence)
-via `DEC-039` / `DIS-008`. **Shipped** vs **planned** is marked explicitly.
+This document is the **full recipe** for external review. Pass-e amended
+null-exit k/metric, precedence, gold acquisition, and persistence via
+`DEC-040` / `DIS-009`. Reviewer suggestions are absorbed **after critical
+check**, not rubber-stamped (see §7.6 F).
 
 ---
 
@@ -478,83 +479,134 @@ Deferred (`DEF-016`). Runtime may load a local logistic head without a public ca
 Do not silently move after a powered run starts. Pass-d review fixed B/C/D
 numbers and the null-exit **window** (highest severity).
 
-#### A. HYP-003 win criteria (classification) — amended
+#### A. HYP-003 win criteria (classification) — `DEC-040` CI method pin
 
 | Parameter | Pre-registered value |
 |-----------|----------------------|
 | Primary gate | **95% CI of the paired accuracy difference** (embedding − regex) **excludes 0**, **and** point estimate ≥ **+10 pp** on the same 2-way labels |
-| Also report | McNemar p (informative); **minimum detectable effect (MDE)** at achieved n and observed discordance rate — publish in the results table |
-| Must also beat | **Majority-class baseline** by ≥ **5 pp** point estimate (same paired framing; note: at n=60 this is ~3 items — not independently powerful; keep as anti-skew theater, not a second powered test) |
+| **CI method (required)** | **Bootstrap on paired per-item differences** (B ≥ 5000, percentile CI) **or** exact / mid-p **McNemar CI** for the discordant-pair difference. **Forbidden:** naive two-proportion z-interval on unpaired rates |
+| Also report | McNemar p (informative); **MDE** at achieved n and observed discordance — in the results table |
+| Must also beat | Majority baseline ≥ **5 pp** point estimate (anti-skew theater; not a second powered test) |
 | Underpowered (n &lt; 60) | Report only; **may not** flip or confirm DEC-011 |
-| Directional claim | n ≥ **60** |
-| Effect-size claim | n ≥ **100** |
-| Tie / non-win | Keep embedding default; strike validation claim; rely on floors (`H3c` rule) |
+| Directional / effect-size | n ≥ **60** / n ≥ **100** |
+| Tie / non-win | Keep embedding default; strike validation claim; rely on floors |
 
-**Why not “≥10 pp AND McNemar p&lt;0.05”:** at realistic discordance (~33% from HYP-002’s 6/18), MDE at n=60 is ~15–18 pp — so the 10 pp bar was **decorative** and misdescribed the real gate. CI-excludes-0 + point ≥10 pp + published MDE is honest.
+#### B. Downstream null-exit — `DEC-040` (C1/C2 critical)
 
-#### B. Downstream null-exit (graph on vs off) — `DEF-017` / `DEC-039` (critical fix)
+**Defects already logged:** `DIS-008` (k ≤ answer slots blind to graph); **`DIS-009`** (DEC-039’s “k=20 = rerank+append” identity is **false in production** and re-instantiates DIS-008).
 
-**Defect in first lock (`DIS-008`):** `recall@k` with harness default **k = rerank_top_k = 10** only sees answer slots. Graph append lives at positions **11…** (`graph_append_slots`, default 10) and **never enters the window**. HYP-002 already showed six cells with **bit-identical** golden recall@10 while arms made **opposite** graph on/off decisions on 6/18 queries — same error class as circular purity (`DIS-005`): an insensitive metric that would fire null-exit on day one as an artifact.
+**Production facts** (`backend/config.py`, `retriever.py`) — three **independent** knobs:
+
+| Knob | Production default |
+|------|-------------------:|
+| `RERANK_TOP_K` (answer slots) | **20** |
+| `graph_append_slots` (tail) | **10** |
+| `CONTEXT_CHUNK_CAP` | **60** |
+
+`retrieve_ranked`: answer slots first, graph neighbors **after** (ranks ~21–30 at defaults), then AST-aware cap at `context_chunk_cap`.  
+`rerank_top_k + graph_append_slots = 30` ≠ `context_chunk_cap = 60`. The identity “cap = rerank + append” exists only in the **eval harness** (`context_chunk_cap = k + graph_append_slots` with k=10). Pinning k=20 under production `RERANK_TOP_K=20` makes k **equal answer slots again** — graph still outside the window.
 
 | Parameter | Pre-registered value |
 |-----------|----------------------|
-| **k (pinned)** | **`context_chunk_cap` = `rerank_top_k` + `graph_append_slots`** (production defaults: **10 + 10 = 20**). State the integer used in every results row. Prefer scoring the **full injected context block** when that length differs. |
-| Primary metric | **nDCG@k** with k = cap (rank-sensitive; penalizes relevant material buried at position ~15) |
-| Secondary | **recall@k** at the **same** k=cap (not k=10) |
-| Cost report | **Token / chunk delta** (on − off): count of graph-appended chunks and approx tokens so the ≤10-tail-slot cost is in the decision |
-| Test | Two-sided paired test on per-query nDCG@cap deltas (Wilcoxon signed-rank default) |
+| **What to score** | **All chunks returned by `retrieve_ranked`** (post-cap list). Report `k_eff = len(ranked)` and the live config triple `(rerank_top_k, graph_append_slots, context_chunk_cap)`. |
+| **Harness hard assert** | **`k_eff > rerank_top_k` whenever `use_graph_append` is true on that query** (or global assert: eval fails if any graph-on query has `k_eff <= rerank_top_k`). Prevents silent third recurrence of DIS-008. Read knobs from **config at eval time**, never restate a false identity. |
+| **Primary metric** | **recall@k_eff** (set recall over the full injected list). Graph is a **context block for an LLM**, not a SERP — presence in the prompt matters more than log-rank. |
+| **Mandatory co-report** | **Δchunks**, **Δtokens** (on − off), and **Δrecall / max(Δtokens, 1)** so cost is in the decision (DEC-010 trade). |
+| **nDCG@k_eff** | **Secondary diagnostic only** — not null-exit primary. Log-discount under-credits tail append (rank 21 ≈ 0.22 of rank 1) and **biases toward firing null-exit** (killing the program). Reviewer pass-d suggestion; corrected in pass-e. |
+| Test | Two-sided paired test on per-query **recall** deltas (Wilcoxon default) |
 | α | **0.05** |
-| Practical significance | Mean Δ nDCG@cap (on − off) ≥ **+0.05** |
-| Null-exit fires when | Not (significant **and** mean Δ ≥ 0.05) on powered set (n ≥ 60 queries with gold) **using k=cap** |
-| Effect of null-exit | **Drop** train steps 3–6 (`DEF-017`). Keep instrumentation, floors, Observatory, **HYP-004** |
+| Practical significance | Mean Δ recall ≥ **+0.05** **and** mean Δchunks ≥ 1 on graph-on arm (else measurement is broken) |
+| **Before DEF-017 drop** | Run **C5 knob sweep** (below). Null at default knobs alone does **not** license “routing never matters.” |
+| Null-exit after sweep | If **no** cell in the sweep shows (sig **and** practical) on/off effect → **drop** train steps 3–6 (`DEF-017`). Keep instrumentation, floors, Observatory, **HYP-004**. If a cell shows effect → **retune graph defaults** (separate DEC), re-run null-exit; do **not** auto-start a labeling program. |
 
-**Forbidden as null-exit metric:** `recall@10` / any k ≤ `rerank_top_k` alone — structurally blind to graph append.
+**Forbidden:** k ≤ `rerank_top_k`; false identity `context_chunk_cap = rerank_top_k + graph_append_slots`; nDCG as sole/primary null-exit gate.
 
-#### C. Floor thresholds τ / δ — amended
+**Critical note on recall@cap:** set recall is weakly biased toward “more chunks help.” The **mandatory cost co-report** is the guard, not positional nDCG. If Δrecall is tiny while Δtokens is large, treat as **economically weak** in write-up even if statistically detectable — still not a free pass to keep an expensive train program without a product call.
 
-| Parameter | Pre-registered value |
-|-----------|----------------------|
-| Ship with step 0 | Always **log** `max_cos`, `margin`, `abs_floor_would_fire`, `margin_floor_would_fire` |
-| Policy effect default | **Off** until enablement rule is met |
-| Provisional hard τ | **0.12** (≈ measured p05 of max(cos) on small arena code-ish sample) — **not** 0.25 |
-| Provisional hard δ | **0.05** (still provisional; log-only until enablement) |
-| Enablement (all required) | (1) ≥ **200** production embedding routes logged; (2) hand-tagged code-ish vs OOD sample large enough to estimate; (3) **max_cos AUC ≥ ~0.80** on that sample as OOD detector; (4) then set τ from **~p05 of max(cos) on code-ish** (explicit **5% false-abstain budget on code turns**, not a detection spec) and δ from **~p25 of margin** on turns that pass abs floor |
-| Refuse early enable | If AUC &lt; 0.80 or sample too small — **leave policy off** even if provisional constants exist |
-| Recalibrate | On `label_set_sha` / `encoder_id` change; log old/new |
-
-**Why not τ=0.25:** live centroid measurement (indicative n≈25/20): seed max_cos p05≈0.49, arena code-ish p05≈0.12 / p50≈0.26, non-code lower. τ=0.25 would fire on ~40% of code-ish arena queries — not “rarely.” max_cos AUC≈0.73 on that sample is weak; percentile alone does not guarantee detection quality.
-
-#### D. Trace in learned target + **narrowed multi-hop regex** — amended
+#### C. Floor thresholds τ / δ — + partition (`DEC-040` C4)
 
 | Parameter | Pre-registered value |
 |-----------|----------------------|
-| Decision | **Regex-only multi-hop from day one**; learned classes `{graph_off, one_hop}` only |
-| Synthetic trace for train | **Forbidden** |
-| **Multi-hop gate pattern** | Narrowed: `\b(trace|call\s*chain|call\s*graph|data\s+flow\s+through)\b` — **drop** `how does` / `where is` / `who calls` from the **router multi-hop** path |
-| Naming | **Do not** reuse `hybrid.TRACE_RE` / `is_trace_query` for both jobs. Introduce a dedicated router multi-hop predicate (e.g. `is_multihop_trace_query`); leave hybrid’s broader pattern only if something else still needs it, under a **different** name/role |
-| Evidence | Current `is_trace_query` fires 7/24 seeds and **inverts 4 graph-OFF labels to multi-hop** (`where is … defined`, `how does …`) — the HYP-002 defect. Narrowed pattern: 1/24 seeds, 0 inversions |
-| Revisit | Non-templated natural multi-hop corpus only |
+| Ship with step 0 | Always **log** max_cos, margin, would-fire flags |
+| Policy effect default | **Off** until enablement |
+| Provisional hard τ | **0.12** (indicative arena p05; not 0.25) |
+| Provisional hard δ | **0.05** |
+| **Calibration / holdout partition** | **Freeze before either use.** `calibration ∩ holdout = ∅`. Record **`split_id`** on every route record so membership is auditable. Fitting τ on the same arena turns used as HYP-003 ID holdout is **DIS-004-class leakage**. |
+| Enablement (all required) | (1) ≥ **200** production embedding routes on the **calibration** split; (2) hand tags **≥ 50 code-ish and ≥ 50 OOD** on calibration only; (3) **max_cos AUC ≥ ~0.80** with **published AUC CI** (bootstrap); if CI lower bound &lt; 0.70, refuse enable; (4) τ ≈ p05(code-ish max_cos) on calibration = **5% false-abstain budget on code**, not a detection spec; δ ≈ p25(margin) on calibration turns that pass abs floor |
+| Refuse early enable | AUC weak, n_tag too small, or partition missing → policy stays **off** |
+| Recalibrate | On `label_set_sha` / `encoder_id` change; log old/new; **do not** re-fit on holdout |
 
-#### E. Precedence of mechanisms (`DEC-039`) — must pin before implement
+#### D. Trace / multi-hop regex — unchanged intent + measurement note
 
-Four (plus floors) mechanisms; order changes behavior. **Production resolve order:**
+| Parameter | Pre-registered value |
+|-----------|----------------------|
+| Learned target | **2-way** `{graph_off, one_hop}` only; synthetic trace train **forbidden** |
+| Multi-hop pattern | Narrowed: `trace \| call chain \| call graph \| data flow through`; new predicate name |
+| Measurement (not a product change yet) | Narrowed pattern may fire ~0 on arena after path override. After `DEC-037` logs, if multi-hop incidence ≈ 0 for a long window, **consider** retiring `graph_trace` so deployed policy collapses to the 2-way learned target — **only after measurement**, not assumed |
+
+#### E. Precedence — amended (`DEC-040` C3)
 
 ```text
-1. Path override (≥2 explicit path mentions) → force graph-on 1-hop (cross_file),
-   wins over floors and learned/regex category.
-2. Multi-hop regex gate (narrowed pattern above) → force graph_trace + append
-   if matched (unless path override already set a policy — path still wins on
-   append; multi-hop may still set graph_trace only if product wants both —
-   default: path override fully replaces route, as today).
-3. Learned / centroid 2-way head (or current 6-way→route_from_category) →
-   graph_off vs one_hop (never emits multi-hop as a learned class).
-4. Absolute cosine floor (if enabled) → if max(cos) < τ → graph_off
-   (does not fire if path override already applied).
-5. Margin floor (if enabled) → if top1−top2 < δ → one_hop
-   (does not fire if path override or abs floor already forced graph_off).
+1. Path override (≥2 explicit path mentions)
+     → force graph-on 1-hop (cross_file). Strongest repo-grounded evidence.
+2. Absolute cosine floor (if enabled)
+     → max(cos) < τ → graph_off.
+     OOD veto must NOT sit under a keyword; "trace the history of jazz" must not
+     multi-hop. (Floors default off until enablement — false-OOD risk is gated.)
+3. Narrowed multi-hop regex
+     → graph_trace + append when matched and not already graph_off from (2).
+4. Learned / centroid 2-way head
+     → graph_off vs one_hop.
+5. Margin floor (if enabled)
+     → top1−top2 < δ → one_hop (ambiguity; never overrides path or abs floor).
 ```
 
-**Stated default:** path override ≻ multi-hop regex ≻ model/centroid ≻ abs floor ≻ margin floor. Log which step decided (`decision_stage` in route event).
+**Stated default:** path override ≻ **abs cosine floor** ≻ multi-hop regex ≻ model/centroid ≻ margin floor.  
+Log `decision_stage`. **Critical trade:** abs floor above multi-hop means a **miscalibrated τ** can suppress real multi-hop — acceptable only because floors ship **policy-off** until AUC/partition gates pass.
+
+#### F. Critical absorption log (pass-e) — not rubber-stamped
+
+| ID | Reviewer claim | Implementer verdict | Why |
+|----|----------------|---------------------|-----|
+| **C1** | k=20 re-instantiates DIS-008 | **Accept — blocking** | Verified in `config.py`: RERANK=20, CAP=60, append=10. Prior “identity” was harness-only. |
+| **C2** | nDCG wrong primary for LLM context block | **Accept primary swap** with cost guard | Self-correction is right re: log-discount vs prompt. Reject “recall alone without cost” — Δtokens/Δchunks **mandatory**. Reject freezing nDCG as primary. |
+| **C3** | abs floor above multi-hop regex | **Accept** | Keyword must not override OOD veto. Risk of false OOD mitigated by enablement gates. |
+| **C4** | calibration∩holdout leakage | **Accept** | Real DIS-004-class. + min 50/class + AUC CI. |
+| **C5** | null confounded with untuned graph knobs | **Accept bounded sweep** | Grid only `{1,3,5}×{5,10,20}`; then drop or retune defaults — **not** “router train is proven.” |
+| **C6** | n≥60 gold has no owner/cost | **Accept as §10 work item** | Highest schedule risk. Do not pretend arena free-labels. |
+| **C7** | route record store unclear | **Accept** | Conversation JSON sibling of `context_sources`; SQLite projection only. |
+
+#### G. Knob sweep before DEF-017 drop (C5)
+
+On the **same** gold set, after a null at default `(seed_k=3, slots=10)`:
+
+| `graph_seed_k` | `graph_append_slots` |
+|----------------|----------------------|
+| 1, 3, 5 | 5, 10, 20 |
+
+Nine cells, on/off per cell, same primary metric and asserts as §B.  
+- **Any** cell meets sig + practical → **do not** drop steps 3–6; open graph-default retune DEC; re-test router under new defaults.  
+- **No** cell meets → DEF-017 drop train steps with confidence that “append enrichment under this retriever family” is weak, not just one bad knob.
+
+#### H. Relevance gold acquisition (C6) — blocking for powered null-exit
+
+| Item | Plan |
+|------|------|
+| **Need** | n ≥ **60** queries with **chunk- or file-level relevance gold** on a **real** indexed repo (fixture-only gold is descriptive, not production ID) |
+| **Today** | 18 golden + 6 probes on toy fixture; arena has **no** free judgments |
+| **Owner** | Program owner (Curia / Auspex) — not “the harvest scripts” |
+| **Rough cost** | **1–2 person-days** for first 60: mix of (a) hand labels on instrumented arena retrievals, (b) curated queries against Curia’s own index with explicit relevant paths, (c) optional weak labels from allowlisted agent trails (**HYP-004**, biased — diagnostic only, not sole gold) |
+| **§10 placement** | Step **0.5** after instrumentation: define label UI/format + freeze holdout IDs; **before** powered HYP-003 / null-exit |
+| **Until gold exists** | Ship `DEC-037` logs; run underpowered descriptive H3a only; **do not** fire DEF-017 on fixture recall@10 theater |
+
+#### I. Route record persistence (C7 / `DEC-037` amend)
+
+| Item | Plan |
+|------|------|
+| **Canonical store** | **Conversation JSON**, on the **assistant message**, **sibling of `context_sources`** (see `storage_service` turn write path) |
+| **Projection** | SQLite / session catalog may mirror for Observatory query — **rebuildable**, never sole copy |
+| **When RAG skipped** | Still write route decision (`rag_used=false`) so the corpus is not survivorship-biased |
+| **Fields** | As `DEC-037` + `split_id` + `decision_stage` + floor would-fire flags |
 
 ---
 
@@ -586,10 +638,11 @@ reranker / index composition (DIS-001), separate gates. **Bias caveat:** trails
 are causally downstream of the *agent’s* retrieval (grep/glob), not Curia
 ColBERT — biased positives toward keyword-findable files, not merely noisy.
 
-### 8.1 Step 0 route-decision schema (`DEC-037`)
+### 8.1 Step 0 route-decision schema (`DEC-037` + `DEC-040` I)
 
 Persisted contract on every retrieval-relevant turn (and when RAG is skipped).
-Pin before implement. Cheap fields; none backfillable later.
+**Canonical:** conversation JSON on the assistant message, **sibling of
+`context_sources`**. SQLite/Observatory = projection only.
 
 | Field | Notes |
 |-------|--------|
@@ -630,12 +683,13 @@ allowlisted (Curia first) pointer-only for trails / OOD — not bulk router gold
 
 | # | Work | Why first |
 |---|------|-----------|
-| **0** | **Instrument** full route schema (`DEC-037`) + Observatory; log even when RAG unused; state override precedence | Unblocks audit + holdout accrual; n≈19 makes this the **clock**, not just first task |
-| **0b** | Floors: log always; policy off; provisional τ=**0.12**, δ=0.05; AUC≥0.80 before enable (`DEC-039`) | OOD vs ambiguity; don’t false-abstain 40% of code |
-| **0c** | Narrow multi-hop regex; split from hybrid TRACE_RE; pin precedence (`DEC-039` E) | Stop re-adopting HYP-002 `where is` multi-hop defect |
-| **1** | **HYP-003** — CI/MDE win + **nDCG@cap** null-exit (k=20 default); never recall@10 alone | Honest evidence; may **kill** later steps |
-| **2** | **Fix metrics** — retire purity; score `_resolve_route`; 6-way diagnostic without fudge | Stop blessing unfailing metrics |
-| **3–6** | **2-way** learned target, floors/OOD, harvest re-aim, L2 logistic | **Only if** null-exit does not fire; else **drop** (`DEF-017`) |
+| **0** | **Instrument** route into **conversation JSON** (sibling of `context_sources`) + Observatory projection; full schema; `split_id` / `decision_stage` | Canonical store; HYP-003 corpus must survive projection rebuild |
+| **0b** | Floors log-only; τ=0.12 provisional; enable only with partition + AUC CI (`DEC-040`) | |
+| **0c** | Narrow multi-hop regex; precedence: path ≻ **abs floor** ≻ multi-hop ≻ model ≻ margin | OOD veto above keyword |
+| **0.5** | **Relevance gold** n≥60 — owner + 1–2 pd (C6) | Blocks powered null-exit; highest schedule risk |
+| **1** | **HYP-003** — paired CI win + **recall@k_eff** null-exit with assert `k_eff > rerank_top_k`; cost co-report; **knob sweep before DEF-017** | |
+| **2** | Fix purity / fudge / `_resolve_route` scoring | |
+| **3–6** | 2-way train path | Only if null-exit does not fire after sweep |
 | **7** | Hub publish | `DEF-016` |
 | **∥** | **HYP-004** — trails for DIS-001; account for grep-bias | Primary mining value |
 
@@ -675,7 +729,7 @@ SupCon, shelf-driven Hub, archiving private harvest dumps in-tree.
 | PLAN pre-review / pass-a / pass-b | **This doc** |
 | Route log schema pin | **`DEC-037` — implement next** |
 | Abs + margin floors | **Planned (0b)**; thresholds in `DEC-038` |
-| Pre-registered win Δ / null-exit / floors / trace / precedence | **`DEC-038` + `DEC-039` (B/C/D/E amended)** |
+| Pre-registered metrics / floors / precedence / gold / persistence | **`DEC-038`→`039`→`040` (current: `DEC-040`)** |
 | Honest holdout eval (HYP-003) | **Planned** (numbers in §7.6) |
 | Purity gate retirement / `_resolve_route` scoring | **Planned** |
 | Allowlist + pointer-only harvest | **Planned** (default-deny) |
@@ -702,11 +756,11 @@ SupCon, shelf-driven Hub, archiving private harvest dumps in-tree.
 
 ## 14. One-paragraph summary
 
-We route **query intent → graph/trace policy** with a **frozen MiniLM centroid
-router** promoted on **resubstitution** evidence. Production is **3-way**;
-**learned target is 2-way**; multi-hop is a **narrowed regex** (not `where is`).
-**Instrument first** (`DEC-037`). Null-exit uses **nDCG@context_chunk_cap**
-(default k=**20**), never recall@10. Classification win: **95% CI of paired Δ
-excludes 0** and point ≥10 pp; publish MDE. Floors log-only until AUC≥0.80;
-provisional **τ=0.12**. Precedence pinned (`DEC-039` E). Drop train on null
-(`DEF-017`). No Hub until consent + evidence.
+We route **query intent → graph policy** with a centroid router on weak
+evidence. **Learned target is 2-way**; multi-hop is narrowed regex. **Instrument
+into conversation JSON** first. Null-exit scores **full `retrieve_ranked` list**
+with harness assert against answer-slot blindness; primary **recall + Δtokens**,
+not nDCG. Win = paired **bootstrap/McNemar CI** + 10 pp. Floors: path ≻ **abs
+OOD** ≻ multi-hop ≻ model; log-only until partitioned AUC gate. **Gold n≥60**
+is a real workstream. Knob sweep before DEF-017 drop. No Hub until consent +
+evidence.

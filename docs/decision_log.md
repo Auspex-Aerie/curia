@@ -644,7 +644,7 @@ _(pending)_
 - **implication:** Null-exit must use **k = context_chunk_cap = rerank_top_k + graph_append_slots** (default **20**) and prefer **nDCG@cap** (rank-sensitive). Never gate on recall@10 alone. First `DEC-038` B lock was wrong and would have dropped steps 3–6 on day one as an artifact.
 
 ### DEC-039: Amend DEC-038 — null-exit window, win CI/MDE, τ, multi-hop regex, precedence
-- **date:** 2026-08-02 · **status:** accepted · **triggered_by:** handback pass-d B1/B2/B3/M1; `DIS-008` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6 · **related:** `DEC-038` (supersedes B/C/D thresholds and adds E), `DEF-017`, `HYP-003`, `HYP-002`
+- **date:** 2026-08-02 · **status:** superseded in part by `DEC-040` (k/metric/precedence/gold/persistence) · **triggered_by:** handback pass-d B1/B2/B3/M1; `DIS-008` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6 · **related:** `DEC-038` (supersedes B/C/D thresholds and adds E), `DEF-017`, `HYP-003`, `HYP-002`
 - **decision:**
   1. **Null-exit metric:** pin **k = context_chunk_cap** (= `rerank_top_k` + `graph_append_slots`, production default **20**). Primary **nDCG@k**; secondary recall@k at same k; report chunk/token delta (on−off). α=0.05; mean Δ nDCG@cap ≥ +0.05 for practical significance. **Forbidden:** recall@10 / k≤rerank_top_k alone.
   2. **Classification win:** gate on **95% CI of paired accuracy difference excluding 0** and point estimate ≥ **+10 pp**. Always publish **MDE** at achieved n and observed discordance. McNemar p is informative only. Majority baseline ≥5 pp stays as anti-skew (not a second powered test).
@@ -653,3 +653,21 @@ _(pending)_
   5. **Precedence (log `decision_stage`):** path override ≻ narrowed multi-hop regex ≻ model/centroid 2-way ≻ abs cosine floor ≻ margin floor.
 - **rationale:** Pass-d measured metric blindness, McNemar/MDE mismatch, τ miscalibration vs arena max_cos, and seed inversions from broad TRACE_RE. Fixes prevent replaying DIS-005 with a new name and re-adopting the HYP-002 regex defect.
 - **impact:** PLAN §7.6 rewritten; implement with `DEC-037`. Do not implement first-lock τ=0.25 or recall@10 null-exit.
+
+### DIS-009: DEC-039 k=20 re-instantiates graph-blind recall (DIS-008 again)
+- **date:** 2026-08-02 · **status:** observed · **triggered_by:** handback pass-e C1; verified against `backend/config.py` · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6 B · **related:** `DIS-008`, `DEC-039`, `DEC-040`
+- **finding:** Production defaults are independent: `RERANK_TOP_K=20`, `graph_append_slots=10`, `CONTEXT_CHUNK_CAP=60`. DEC-039 pinned k via false identity `context_chunk_cap = rerank_top_k + graph_append_slots` (true only in the eval harness with k=10). Under production, k=20 equals answer-slot count — graph tails (~ranks 21–30) again fall outside the measurement window. Same defect class as `DIS-008`, one amendment later, because the constant was taken from the harness not config.
+- **implication:** Score **all chunks from `retrieve_ranked`**; read live config at eval; **assert** `k_eff > rerank_top_k` on graph-on queries. Never restate the harness identity as production truth.
+
+### DEC-040: Amend null-exit metric, precedence, gold path, route persistence (pass-e)
+- **date:** 2026-08-02 · **status:** accepted · **triggered_by:** handback pass-e C1–C7; `DIS-009`; critical implementer review of reviewer counters · **docs_updated:** `docs/decision_log.md`, `RAGRouter/Training/docs/PLAN.md` §7.6 · **related:** `DEC-037`, `DEC-039` (supersedes k/nDCG/precedence cells), `DEF-017`, `HYP-003`
+- **decision:**
+  1. **Null-exit window:** score full `retrieve_ranked` output; report `k_eff` and `(rerank_top_k, graph_append_slots, context_chunk_cap)` from live config; harness **assert** graph-on ⇒ `k_eff > rerank_top_k`. **Primary = recall@k_eff**; mandatory **Δchunks / Δtokens / Δrecall per token**; **nDCG demoted to diagnostic** (log-discount biases toward null-exit on tail append). Forbidden: k≤answer slots; false cap=rerank+append identity.
+  2. **Win CI method:** bootstrap on paired differences or McNemar/exact CI — not two-proportion z.
+  3. **Precedence:** path override ≻ **abs cosine floor** ≻ narrowed multi-hop regex ≻ model ≻ margin floor.
+  4. **Calibration partition:** freeze calibration∩holdout=∅; `split_id` on route records; ≥50 tags/class + AUC CI before floor enable.
+  5. **Before DEF-017 drop:** 3×3 sweep `graph_seed_k∈{1,3,5}` × `graph_append_slots∈{5,10,20}`; drop train steps only if no cell helps; else retune graph defaults first.
+  6. **Gold:** n≥60 relevance labels is §10 step 0.5, program-owned, ~1–2 person-days; fixture-only gold cannot fire DEF-017.
+  7. **Persistence:** route decision in **conversation JSON** as sibling of `context_sources` on assistant message; SQLite is projection only; log when `rag_used=false`.
+- **rationale:** C1 verified in config. C2 self-correction accepted with cost guard (recall alone is weakly length-biased). C3–C7 close real leakage, confounding, schedule, and canonical-store gaps. Implementer did not rubber-stamp: nDCG not kept as primary; sweep is bounded; gold cost made explicit.
+- **impact:** PLAN §7.6 / §10 rewritten. Do not implement DEC-039 k=20 or nDCG-primary null-exit.
