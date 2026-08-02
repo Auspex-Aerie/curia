@@ -4,6 +4,7 @@ from backend.rag.entity_index import EntityIndex
 from backend.rag.hybrid import (
     apply_readme_demotion,
     extract_path_mentions,
+    is_multihop_trace_query,
     is_trace_query,
     readme_demotion_factor,
     resolve_path_mentions,
@@ -22,6 +23,8 @@ class TestHybrid:
     def test_trace_query_detection(self):
         assert is_trace_query("trace the call chain for auth")
         assert not is_trace_query("what is a widget")
+        assert is_multihop_trace_query("trace the call chain for auth")
+        assert not is_multihop_trace_query("where is authenticate defined")
 
     def test_seed_chunks_from_symbol(self):
         chunk = CodeChunk(

@@ -693,3 +693,9 @@ _(pending)_
   3. All other `DEC-041` PB locks stand. **Plan iteration closed** from reviewer side; next work is implement `DEC-037` (+040/041/042 harness rules).
 - **rationale:** Fixed pad=10 length-mismatches when append under-fills (0…10 new neighbors after seed dedupe + post-cap), inflating control recall and biasing null-exit — same decision-bias class as DIS-005/008/009. Per-query match restores the equal-budget counterfactual.
 - **impact:** Null-exit harness must compute pad from treatment arm final length. PLAN §7.6 B updated.
+
+### DEC-043: Ship query-route decision instrumentation (DEC-037–042)
+- **date:** 2026-08-02 · **status:** accepted · **triggered_by:** `DEC-037`–`DEC-042`; plan iteration closed · **docs_updated:** `docs/decision_log.md`, `backend/rag/route_decision.py`, `backend/rag/retriever.py`, `backend/rag/hybrid.py`, `backend/rag/query_router.py`, `backend/context_engine.py`, `backend/storage_service.py`, `backend/run_turn.py`, `backend/turn_service.py`, `backend/routes/conversations.py`, `backend/models.py`, `tests/unit/test_route_decision.py` · **related:** `DEC-037`, `DEC-040`, `DEC-041`, `DEC-042`
+- **decision:** Implement production `resolve_route_decision` with pinned precedence (path ≻ abs floor log/policy ≻ narrowed multi-hop ≻ model ≻ margin floor); persist `route_decision` on assistant messages beside `context_sources`; SSE `route_decision` event; floors default policy-off (`ROUTER_ABS_FLOOR_ENABLED` / `ROUTER_MARGIN_FLOOR_ENABLED`); multi-hop via `is_multihop_trace_query`; `CodeRetriever.retrieve_padded_control` + pad helpers for DEC-042 eval.
+- **rationale:** Closes observability hole blocking honest HYP-003 labels; implements closed plan without mining/train.
+- **impact:** Conversation JSON grows a route_decision object per assistant turn when context is prepared. Observatory can surface later; SQLite projection unchanged for now (canonical JSON holds the record).

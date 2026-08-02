@@ -15,12 +15,12 @@ from .fusion import reciprocal_rank_fusion
 from .hybrid import (
     apply_readme_demotion,
     extract_path_mentions,
-    is_trace_query,
     seed_chunks_from_identifiers,
     seed_chunks_from_paths,
     seed_chunks_from_query,
 )
-from .query_router import QueryRoute, RouteFn, route_query
+from .query_router import QueryRoute, RouteFn
+from .route_decision import RouteDecision, resolve_route_decision
 from .rerank import CrossEncoderReranker
 from .store import ConversationStore
 from .types import CodeChunk
@@ -124,6 +124,7 @@ class CodeRetriever:
         self.graph_hops = graph_hops
         self.config = config or RetrievalConfig.from_settings()
         self._route_fn = route_fn
+        self.last_route_decision: Optional[RouteDecision] = None
 
     def _semantic_search(self, query: str, k: int) -> List[Tuple[CodeChunk, float]]:
         if self.config.semantic_backend == "colbert":
@@ -134,24 +135,30 @@ class CodeRetriever:
         return self.store.similarity_search(query, k=k)
 
     def _resolve_route(self, query: str) -> QueryRoute:
-        if self.config.use_query_router:
-            fn = self._route_fn or route_query
-            route = fn(query)
-            if len(extract_path_mentions(query)) >= 2 and not route.use_graph_append:
-                return QueryRoute(
-                    category="cross_file",
-                    use_graph_append=True,
-                    graph_trace=False,
-                    graph_seed_k=3,
-                )
-            return route
-        trace = self.config.graph_trace and is_trace_query(query)
-        return QueryRoute(
-            category="trace" if trace else "semantic",
-            use_graph_append=self.config.use_graph,
-            graph_trace=trace,
-            graph_seed_k=3,
+        """Deployed policy via resolve_route_decision (DEC-037+); stores last_route_decision."""
+        decision = resolve_route_decision(
+            query,
+            route_fn=self._route_fn if self.config.use_query_router else None,
+            use_query_router=self.config.use_query_router,
+            rag_used=True,
         )
+        if not self.config.use_query_router:
+            # Legacy config path: honor graph_trace flag from RetrievalConfig.
+            from .hybrid import is_multihop_trace_query
+
+            multihop = self.config.graph_trace and is_multihop_trace_query(query)
+            decision = RouteDecision(
+                category="trace" if multihop else "semantic",
+                use_graph_append=self.config.use_graph,
+                graph_trace=multihop,
+                graph_seed_k=3 if self.config.use_graph else 0,
+                router_mode="config",
+                decision_stage="config_default",
+                rag_used=True,
+                path_mentions=len(extract_path_mentions(query)),
+            )
+        self.last_route_decision = decision
+        return decision.to_query_route()
 
     def _expand_graph(
         self,
@@ -325,10 +332,19 @@ class CodeRetriever:
         return self._build_candidate_pool(query)[:k]
 
     def retrieve_post_rerank_pre_graph(
-        self, query: str, top_k: Optional[int] = None
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        *,
+        diversify_k: Optional[int] = None,
     ) -> List[Tuple[CodeChunk, float]]:
-        """Top-K after rerank + README demotion, before graph expansion."""
+        """Top-K after rerank + README demotion, before graph expansion.
+
+        diversify_k: when path mentions exist, pass k+pad into source-diverse
+        select so a padded control arm is not silently truncated (DEC-041/042).
+        """
         k = top_k or self.rerank_top_k
+        div_k = diversify_k if diversify_k is not None else k
         pool = self._build_candidate_pool(query)
         if self.config.use_rerank and self.reranker.enabled:
             ranked = self.reranker.rerank(
@@ -349,7 +365,7 @@ class CodeRetriever:
             }
             ranked = self._select_source_diverse(
                 ranked,
-                k,
+                div_k,
                 protected_ids=protected_ids,
             )
         return ranked[:k]
@@ -357,6 +373,12 @@ class CodeRetriever:
     def retrieve_ranked(self, query: str) -> List[Tuple[CodeChunk, float]]:
         """Return ranked chunks without formatting — used by eval harness."""
         if self.store.vectorstore is None and not self.store.chunks:
+            self.last_route_decision = resolve_route_decision(
+                query,
+                route_fn=self._route_fn if self.config.use_query_router else None,
+                use_query_router=self.config.use_query_router,
+                rag_used=False,
+            )
             return []
 
         route = self._resolve_route(query)
@@ -367,6 +389,28 @@ class CodeRetriever:
         ranked = self._dedupe_parent_content(ranked)
         return apply_ast_aware_cap(ranked, self.context_chunk_cap)
 
+    def retrieve_padded_control(
+        self,
+        query: str,
+        *,
+        graph_on: Optional[List[Tuple[CodeChunk, float]]] = None,
+    ) -> List[Tuple[CodeChunk, float]]:
+        """DEC-042 chunk-matched control: next pool slices, pad from final graph-on length."""
+        from .pre_cap import apply_ast_aware_cap
+        from .route_decision import pad_for_matched_control
+
+        on = graph_on if graph_on is not None else self.retrieve_ranked(query)
+        pad_i = pad_for_matched_control(len(on), self.rerank_top_k)
+        target_len = self.rerank_top_k + pad_i
+        pre = self.retrieve_post_rerank_pre_graph(
+            query,
+            top_k=target_len,
+            diversify_k=target_len,
+        )
+        # No graph expand; match production post-processing length cap
+        pre = self._dedupe_parent_content(pre)
+        return apply_ast_aware_cap(pre, min(self.context_chunk_cap, target_len))
+
     def retrieve(self, query: str) -> Tuple[str, List[dict], float]:
         start = time.monotonic()
         ranked = self.retrieve_ranked(query)
@@ -374,11 +418,12 @@ class CodeRetriever:
         elapsed_ms = (time.monotonic() - start) * 1000
 
         logger.info(
-            "CodeRAG retrieved %d chunks (convo=%s query_len=%d ms=%.0f top=%s)",
+            "CodeRAG retrieved %d chunks (convo=%s query_len=%d ms=%.0f top=%s stage=%s)",
             len(entries),
             self.store.conversation_id,
             len(query),
             elapsed_ms,
             [e.get("citation") for e in entries[:5]],
+            getattr(self.last_route_decision, "decision_stage", None),
         )
         return context_block, entries, elapsed_ms

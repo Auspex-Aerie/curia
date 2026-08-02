@@ -28,6 +28,7 @@ class RetrievalResult:
     total_tokens: int = 0
     retrieval_time_ms: float = 0.0
     context_block: str = ""
+    route_decision: Optional[Dict[str, Any]] = None
 
     def to_context_sources(self) -> List[Dict[str, Any]]:
         """Convert chunks to the legacy context_sources format."""
@@ -152,7 +153,7 @@ class RAGProvider(ABC):
         query: str,
         manual_items: Optional[List[Dict[str, Any]]] = None,
         allow_rag: bool = True,
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+    ) -> Tuple[str, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """
         Get context for a query, with support for manual overrides.
 
@@ -166,7 +167,8 @@ class RAGProvider(ABC):
             allow_rag: Whether to allow RAG retrieval (False = return empty)
 
         Returns:
-            Tuple of (context_block, context_sources)
+            Tuple of (context_block, context_sources, route_decision)
+            route_decision is DEC-037 telemetry (may be None for pure manual context).
         """
         pass
 
@@ -292,8 +294,8 @@ class NullRAGProvider(RAGProvider):
         query: str,
         manual_items: Optional[List[Dict[str, Any]]] = None,
         allow_rag: bool = True,
-    ) -> Tuple[str, List[Dict[str, Any]]]:
-        return "", []
+    ) -> Tuple[str, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        return "", [], None
 
     def is_indexed(self, conversation_id: str) -> bool:
         return False

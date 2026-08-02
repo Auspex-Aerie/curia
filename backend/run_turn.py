@@ -39,6 +39,7 @@ class TurnRunResult:
     reset: bool = False
     gated: bool = False
     context_sources: List[Dict[str, Any]] = field(default_factory=list)
+    route_decision: Optional[Dict[str, Any]] = None
     title_task: Optional[asyncio.Task] = None
 
 
@@ -386,6 +387,7 @@ async def run_turn(
                 arena_models=arena_models,
                 chairman_model=chairman_model,
             ),
+            route_decision=ctx.route_decision,
             caller=caller,
             origin=origin,
         )
@@ -394,5 +396,6 @@ async def run_turn(
         response_dict=response_dict,
         execution=execution,
         context_sources=ctx.context_sources,
+        route_decision=ctx.route_decision,
         title_task=title_task,
     )

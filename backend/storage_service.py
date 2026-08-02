@@ -264,20 +264,23 @@ class StorageService:
         context_sources: Optional[List[Dict[str, Any]]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         *,
+        route_decision: Optional[Dict[str, Any]] = None,
         caller: Optional[str] = None,
         origin: Optional[str] = None,
     ) -> None:
         def append(conversation: Dict[str, Any]) -> None:
-            conversation.setdefault("messages", []).append(
-                {
-                    "role": "assistant",
-                    "stage1": stage1,
-                    "stage2": stage2,
-                    "stage3": stage3,
-                    "context_sources": context_sources or [],
-                    "metadata": metadata or {},
-                }
-            )
+            message: Dict[str, Any] = {
+                "role": "assistant",
+                "stage1": stage1,
+                "stage2": stage2,
+                "stage3": stage3,
+                "context_sources": context_sources or [],
+                "metadata": metadata or {},
+            }
+            # DEC-037: canonical route record beside context_sources
+            if route_decision is not None:
+                message["route_decision"] = route_decision
+            conversation.setdefault("messages", []).append(message)
 
         self._mutate(conversation_id, append, caller=caller, origin=origin)
 

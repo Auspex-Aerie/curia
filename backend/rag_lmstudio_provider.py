@@ -231,12 +231,15 @@ class LMStudioRAGProvider(RAGProvider):
             for e in entries
         ]
         total_tokens = sum(c.metadata.get("est_tokens", 0) for c in chunks)
-        return RetrievalResult(
+        result = RetrievalResult(
             chunks=chunks,
             total_tokens=total_tokens,
             retrieval_time_ms=elapsed_ms,
             context_block=_block,
         )
+        if retriever.last_route_decision is not None:
+            result.route_decision = retriever.last_route_decision.to_dict()
+        return result
 
     def get_context(
         self,
@@ -244,11 +247,16 @@ class LMStudioRAGProvider(RAGProvider):
         query: str,
         manual_items: Optional[List[Dict[str, Any]]] = None,
         allow_rag: bool = True,
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+    ) -> Tuple[str, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         if manual_items:
-            return build_manual_context(manual_items)
+            block, sources = build_manual_context(manual_items)
+            return block, sources, None
         if not allow_rag:
-            return "", []
+            # Still record a route decision so the corpus is not survivorship-biased (DEC-037).
+            from .rag.route_decision import resolve_route_decision
+
+            decision = resolve_route_decision(query, rag_used=False)
+            return "", [], decision.to_dict()
 
         store = self._store(conversation_id)
         retriever = CodeRetriever(
@@ -260,7 +268,12 @@ class LMStudioRAGProvider(RAGProvider):
             config=RetrievalConfig.from_settings(),
         )
         block, entries, _ = retriever.retrieve(query)
-        return block, entries
+        route = (
+            retriever.last_route_decision.to_dict()
+            if retriever.last_route_decision is not None
+            else None
+        )
+        return block, entries, route
 
     def is_indexed(self, conversation_id: str) -> bool:
         store = self._store(conversation_id)

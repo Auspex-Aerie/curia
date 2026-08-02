@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from .hybrid import is_trace_query
+from .hybrid import is_multihop_trace_query
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,8 @@ def route_from_category(category: str) -> QueryRoute:
 
 
 def route_query_regex(query: str) -> QueryRoute:
-    """Regex fallback router (HYP-002 baseline)."""
-    if is_trace_query(query):
+    """Regex fallback router. Multi-hop uses narrowed predicate (DEC-039)."""
+    if is_multihop_trace_query(query):
         return route_from_category("trace")
     lowered = query.lower()
     if any(tok in lowered for tok in ("defined", "definition", "where is", "who calls")):

@@ -45,7 +45,9 @@ def main():
     args = parser.parse_args()
 
     manual_items = load_manual_files(args.manual_file)
-    context_text, entries = get_context(args.conversation, args.query, manual_items)
+    context_text, entries, route_decision = get_context(
+        args.conversation, args.query, manual_items
+    )
 
     print("=== Query ===")
     print(args.query)
@@ -57,9 +59,18 @@ def main():
         print("RAG retrieval used.")
     print()
 
+    if route_decision:
+        print("=== Route decision ===")
+        print(
+            f"stage={route_decision.get('decision_stage')} "
+            f"category={route_decision.get('category')} "
+            f"graph={route_decision.get('use_graph_append')} "
+            f"trace={route_decision.get('graph_trace')}"
+        )
+        print()
+
     print("=== Context summary ===")
-    for entry in entries:
-        tag = entry.get("source_type", "").upper() or "RAG"
+    for entry in entries:        tag = entry.get("source_type", "").upper() or "RAG"
         score = entry.get("score")
         meta = [f"lines={entry.get('lines')}", f"bytes={entry.get('bytes')}", f"tokens~{entry.get('est_tokens')}"]
         if score is not None:

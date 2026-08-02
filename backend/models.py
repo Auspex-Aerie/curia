@@ -232,6 +232,10 @@ class AssistantMessage(BaseModel):
     stage2: List[Dict[str, Any]] = Field(default_factory=list)
     stage3: Dict[str, Any] = Field(default_factory=dict)
     context_sources: List[Dict[str, Any]] = Field(default_factory=list)
+    route_decision: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="DEC-037 query-route decision (sibling of context_sources)",
+    )
     metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
@@ -307,6 +311,7 @@ class TurnCheckpoint(BaseModel):
     context_token_map: Dict[str, int] = Field(default_factory=dict)
     context_block: str = ""
     context_sources: List[Dict[str, Any]] = Field(default_factory=list)
+    route_decision: Optional[Dict[str, Any]] = None
     directives: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
     arena_models: List[str] = Field(default_factory=list)

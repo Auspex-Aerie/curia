@@ -8,7 +8,14 @@ from .entity_index import EntityIndex
 from .types import CodeChunk
 
 README_RE = re.compile(r"(^|/)readme(\.|$)", re.IGNORECASE)
+# Broad historical pattern (legacy callers / hybrid seed heuristics).
+# Do NOT use for multi-hop graph policy — see MULTIHOP_TRACE_RE (DEC-039/041).
 TRACE_RE = re.compile(r"\b(trace|call\s*chain|how\s+does|where\s+is|who\s+calls)\b", re.IGNORECASE)
+# Router multi-hop gate only — excludes how does / where is / who calls (HYP-002 defect).
+MULTIHOP_TRACE_RE = re.compile(
+    r"\b(trace|call\s*chain|call\s*graph|data\s+flow\s+through)\b",
+    re.IGNORECASE,
+)
 PATH_RE = re.compile(
     r"(?<![\w.-])(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9_+-]+)?"
 )
@@ -20,7 +27,13 @@ CODE_IDENTIFIER_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b")
 
 
 def is_trace_query(query: str) -> bool:
+    """Legacy broad matcher. Prefer is_multihop_trace_query for graph_trace policy."""
     return bool(TRACE_RE.search(query))
+
+
+def is_multihop_trace_query(query: str) -> bool:
+    """DEC-039/041: narrow multi-hop intent for router graph_trace."""
+    return bool(MULTIHOP_TRACE_RE.search(query))
 
 
 def readme_demotion_factor(source: str) -> float:

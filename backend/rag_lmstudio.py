@@ -49,7 +49,7 @@ def get_context(
     query: str,
     manual_items: Optional[List[Dict[str, Any]]] = None,
     allow_rag: bool = True,
-) -> Tuple[str, List[Dict[str, Any]]]:
+) -> Tuple[str, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     return _p().get_context(convo_id, query, manual_items, allow_rag)
 
 
