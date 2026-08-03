@@ -13,7 +13,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .hybrid import extract_path_mentions, is_multihop_trace_query
+from .hybrid import (
+    extract_path_mentions,
+    is_multihop_trace_query,
+    resolve_path_mentions,
+)
 from .query_router import (
     ROUTER_CATEGORIES,
     QueryRoute,
@@ -59,27 +63,30 @@ def estimate_query_tokens(
 ) -> Tuple[int, bool]:
     """Token count vs MiniLM max_seq_length=256.
 
-    Prefer the real tokenizer when an embedding router is already loaded (S5);
-    char heuristic only for regex/injected paths without a model.
+    Prefer the real HF tokenizer when available. Do **not** use
+    SentenceTransformer.tokenize() — it truncates at max_seq_length so
+    truncated would be structurally always False (N1 / DIS-010).
     """
     max_seq = 256
     if not query:
         return 0, False
     if embedder is not None:
         try:
-            tok = getattr(embedder, "tokenizer", None) or getattr(
-                getattr(embedder, "_first_module", lambda: None)(), "tokenizer", None
-            )
-            # sentence-transformers: model.tokenize(query)
-            if hasattr(embedder, "tokenize"):
-                feats = embedder.tokenize([query])
-                ids = feats.get("input_ids")
-                if ids is not None:
-                    n = int(ids.shape[-1]) if hasattr(ids, "shape") else len(ids[0])
+            tok = getattr(embedder, "tokenizer", None)
+            if tok is None:
+                first = getattr(embedder, "_first_module", None)
+                mod = first() if callable(first) else first
+                tok = getattr(mod, "tokenizer", None) if mod is not None else None
+            if tok is not None:
+                # truncation=False so long asks report true length (N1)
+                if hasattr(tok, "__call__"):
+                    encoded = tok(query, truncation=False, add_special_tokens=True)
+                    ids = encoded["input_ids"]
+                    n = len(ids)
                     return n, n > max_seq
-            if tok is not None and hasattr(tok, "encode"):
-                n = len(tok.encode(query, add_special_tokens=True))
-                return n, n > max_seq
+                if hasattr(tok, "encode"):
+                    n = len(tok.encode(query, add_special_tokens=True))
+                    return n, n > max_seq
         except Exception:
             logger.debug("tokenizer estimate failed; char heuristic", exc_info=True)
     n = max(1, (len(query) + 3) // 4)
@@ -90,7 +97,7 @@ def derive_split_id(conversation_id: Optional[str], query: str) -> str:
     """Stable calib/holdout bucket without a global env partition (DEC-040 §4 / S6)."""
     seed = (conversation_id or "").strip() or f"query:{query}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
-    # 80/20 calib/holdout by first nibble
+    # ~20% holdout by first *byte* (digest[:2] hex < 51 ≈ 51/256)
     bucket = "holdout" if int(digest[:2], 16) < 51 else "calibration"
     return f"{bucket}:{digest[:12]}"
 
@@ -156,12 +163,16 @@ def resolve_route_decision(
     split_id: Optional[str] = None,
     conversation_id: Optional[str] = None,
     cosines: Optional[Dict[str, float]] = None,
+    indexed_sources: Optional[Sequence[str]] = None,
     use_query_router: bool = True,
 ) -> RouteDecision:
     """Resolve production route with full precedence and telemetry fields.
 
     Policy flags compose (S2): path forces graph *on*; multi-hop sets hop *depth*
     independently — they are not competing categories.
+
+    Path override authority uses **resolved** mentions against indexed sources
+    (N2) so prose like a/b, and/or cannot lock out the OOD veto.
     """
     from ..config import QUERY_ROUTER, ROUTER_EMBED_MODEL
 
@@ -184,8 +195,16 @@ def resolve_route_decision(
     else:
         split = derive_split_id(conversation_id, query)
 
-    paths = extract_path_mentions(query)
-    n_paths = len(paths)
+    raw_paths = extract_path_mentions(query)
+    n_raw = len(raw_paths)
+    # Override authority only when mentions resolve into the index (N2).
+    if indexed_sources is not None:
+        resolved_paths = resolve_path_mentions(query, indexed_sources)
+        n_paths = len(resolved_paths)
+    else:
+        # No index context: do not grant override from raw PATH_RE false positives.
+        resolved_paths = []
+        n_paths = 0
 
     try:
         sha = label_set_sha()
@@ -341,8 +360,28 @@ def resolve_route_decision(
         multi_hop_suppressed_by_abs_floor=multi_hop_suppressed,
         decision_stage=stage,
         split_id=split,
-        path_mentions=n_paths,
+        path_mentions=n_raw,  # raw PATH_RE telemetry; override uses resolved count
     )
+
+
+class MatchedArmsLengthError(AssertionError):
+    """DEC-042 length mismatch — harness should catch, drop pair, continue (N5)."""
+
+
+def safe_matched_pair_or_drop(
+    build_fn: Any,
+) -> Tuple[Optional[Any], Optional[Any], Optional[str]]:
+    """Run a matched-arms builder; on length assert return drop reason instead of abort."""
+    try:
+        on, off = build_fn()
+        return on, off, None
+    except MatchedArmsLengthError as exc:
+        return None, None, str(exc)
+    except AssertionError as exc:
+        msg = str(exc)
+        if "DEC-042" in msg or "length match" in msg:
+            return None, None, msg
+        raise
 
 
 def pad_for_matched_control(

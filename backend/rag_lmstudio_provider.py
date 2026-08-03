@@ -255,7 +255,11 @@ class LMStudioRAGProvider(RAGProvider):
             # Still record a route decision so the corpus is not survivorship-biased (DEC-037).
             from .rag.route_decision import resolve_route_decision
 
-            decision = resolve_route_decision(query, rag_used=False)
+            decision = resolve_route_decision(
+                query,
+                rag_used=False,
+                conversation_id=conversation_id,
+            )
             return "", [], decision.to_dict()
 
         store = self._store(conversation_id)

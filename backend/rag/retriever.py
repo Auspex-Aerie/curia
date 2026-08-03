@@ -20,7 +20,7 @@ from .hybrid import (
     seed_chunks_from_query,
 )
 from .query_router import QueryRoute, RouteFn
-from .route_decision import RouteDecision, resolve_route_decision
+from .route_decision import MatchedArmsLengthError, RouteDecision, resolve_route_decision
 from .rerank import CrossEncoderReranker
 from .store import ConversationStore
 from .types import CodeChunk
@@ -134,6 +134,9 @@ class CodeRetriever:
             logger.warning("ColBERT index missing; falling back to bi-encoder")
         return self.store.similarity_search(query, k=k)
 
+    def _indexed_sources(self) -> List[str]:
+        return [c.source for c in self.store.chunks.values()] if self.store.chunks else []
+
     def _resolve_route(self, query: str) -> QueryRoute:
         """Deployed policy via resolve_route_decision (DEC-037+); stores last_route_decision."""
         decision = resolve_route_decision(
@@ -141,6 +144,8 @@ class CodeRetriever:
             route_fn=self._route_fn if self.config.use_query_router else None,
             use_query_router=self.config.use_query_router,
             rag_used=True,
+            conversation_id=getattr(self.store, "conversation_id", None),
+            indexed_sources=self._indexed_sources(),
         )
         if not self.config.use_query_router:
             # Legacy config path: honor graph_trace flag from RetrievalConfig.
@@ -156,6 +161,7 @@ class CodeRetriever:
                 decision_stage="config_default",
                 rag_used=True,
                 path_mentions=len(extract_path_mentions(query)),
+                split_id=decision.split_id,
             )
         self.last_route_decision = decision
         return decision.to_query_route()
@@ -378,6 +384,8 @@ class CodeRetriever:
                 route_fn=self._route_fn if self.config.use_query_router else None,
                 use_query_router=self.config.use_query_router,
                 rag_used=False,
+                conversation_id=getattr(self.store, "conversation_id", None),
+                indexed_sources=self._indexed_sources(),
             )
             return []
 
@@ -392,32 +400,28 @@ class CodeRetriever:
     def retrieve_matched_arms(
         self, query: str
     ) -> Tuple[List[Tuple[CodeChunk, float]], List[Tuple[CodeChunk, float]]]:
-        """Graph-on + length-matched padded control from one pre-graph ranking (S9/DEC-042)."""
+        """Graph-on + length-matched padded control (DEC-042).
+
+        Treatment arm is **production** ``retrieve_ranked`` (N4: diversify at
+        rerank_top_k, not k+pad). Control uses a separate longer diversify pass
+        — fidelity of the null-exit outranks the single-rerank optimization (S9).
+        """
         from .pre_cap import apply_ast_aware_cap
         from .route_decision import pad_for_matched_control
 
-        route = self._resolve_route(query)
-        # Full pool ranking once; diversify at max needed so pad slice is not truncated.
-        max_div = self.rerank_top_k + self.config.graph_append_slots
-        pre_full = self.retrieve_post_rerank_pre_graph(
-            query,
-            top_k=max_div,
-            diversify_k=max_div,
-        )
-        # Treatment: answer slots then graph (same as retrieve_ranked)
-        answer = pre_full[: self.rerank_top_k]
-        graph_on = self._expand_graph(answer, query, route)
-        graph_on = self._dedupe_parent_content(graph_on)
-        graph_on = apply_ast_aware_cap(graph_on, self.context_chunk_cap)
-
+        graph_on = self.retrieve_ranked(query)
         pad_i = pad_for_matched_control(len(graph_on), self.rerank_top_k)
         target_len = self.rerank_top_k + pad_i
-        control = list(pre_full[:target_len])
+        control = self.retrieve_post_rerank_pre_graph(
+            query,
+            top_k=target_len,
+            diversify_k=target_len,
+        )
         control = self._dedupe_parent_content(control)
         control = apply_ast_aware_cap(control, min(self.context_chunk_cap, target_len))
 
         if len(control) != len(graph_on):
-            raise AssertionError(
+            raise MatchedArmsLengthError(
                 f"DEC-042 length match failed: control {len(control)} != treatment {len(graph_on)} "
                 f"(pad_i={pad_i}, rerank_top_k={self.rerank_top_k})"
             )
@@ -452,7 +456,7 @@ class CodeRetriever:
         pre = self._dedupe_parent_content(pre)
         result = apply_ast_aware_cap(pre, min(self.context_chunk_cap, target_len))
         if len(result) != len(on):
-            raise AssertionError(
+            raise MatchedArmsLengthError(
                 f"DEC-042 length match failed: control {len(result)} != treatment {len(on)}"
             )
         return result

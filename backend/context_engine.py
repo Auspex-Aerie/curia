@@ -208,7 +208,9 @@ class ContextEngine:
             from .rag.route_decision import resolve_route_decision
 
             route_decision = resolve_route_decision(
-                clean_query, rag_used=False
+                clean_query,
+                rag_used=False,
+                conversation_id=conversation_id,
             ).to_dict()
 
         directive_instructions = build_directive_instructions(directives)

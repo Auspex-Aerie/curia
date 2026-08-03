@@ -7,6 +7,7 @@ from backend.rag.query_router import route_from_category, route_query_regex
 from backend.rag.route_decision import (
     append_fill_count,
     build_padded_control_slice,
+    estimate_query_tokens,
     pad_for_matched_control,
     resolve_route_decision,
 )
@@ -33,11 +34,13 @@ class TestMultiHopNarrow:
 class TestPrecedence:
     def test_path_override_forces_graph_on(self):
         q = "compare backend/routes/turns.py and backend/storage_service.py"
+        sources = ["backend/routes/turns.py", "backend/storage_service.py"]
         d = resolve_route_decision(
             q,
             route_fn=lambda _: route_from_category("architectural"),
             abs_floor_enabled=False,
             margin_floor_enabled=False,
+            indexed_sources=sources,
         )
         assert d.use_graph_append is True
         assert d.graph_trace is False
@@ -45,14 +48,30 @@ class TestPrecedence:
         assert d.override_reason == "multi_path"
         assert d.decision_stage == "path_override"
 
-    def test_path_plus_multihop_composes(self):
-        """S2: path forces graph on; multi-hop keeps graph_trace (orthogonal flags)."""
-        q = "trace the call chain from backend/arena.py into backend/run_turn.py"
+    def test_prose_slash_not_path_override(self):
+        """N2: a/b and and/or must not lock out OOD veto."""
+        q = "let's discuss a/b testing and/or multivariate approaches"
         d = resolve_route_decision(
             q,
             route_fn=lambda _: route_from_category("architectural"),
             abs_floor_enabled=False,
             margin_floor_enabled=False,
+            indexed_sources=["backend/arena.py"],  # no match for a/b, and/or
+        )
+        assert d.override_fired is False
+        assert d.path_mentions >= 1  # raw PATH_RE still sees them
+        assert d.use_graph_append is False  # architectural stays graph-off
+
+    def test_path_plus_multihop_composes(self):
+        """S2: path forces graph on; multi-hop keeps graph_trace (orthogonal flags)."""
+        q = "trace the call chain from backend/arena.py into backend/run_turn.py"
+        sources = ["backend/arena.py", "backend/run_turn.py"]
+        d = resolve_route_decision(
+            q,
+            route_fn=lambda _: route_from_category("architectural"),
+            abs_floor_enabled=False,
+            margin_floor_enabled=False,
+            indexed_sources=sources,
         )
         assert d.use_graph_append is True
         assert d.graph_trace is True
@@ -108,6 +127,25 @@ class TestPrecedence:
         assert d.split_id.startswith("calibration:") or d.split_id.startswith("holdout:")
 
 
+class TestTruncationTelemetry:
+    def test_tokenizer_without_truncate_can_flag_long_query(self):
+        class _Tok:
+            def __call__(self, text, truncation=True, add_special_tokens=True):
+                # Simulate no truncation when asked
+                n = len(text)  # 1 id per char for test
+                if truncation:
+                    n = min(n, 256)
+                return {"input_ids": list(range(n))}
+
+        class _Emb:
+            tokenizer = _Tok()
+
+        long = "x" * 400
+        n, trunc = estimate_query_tokens(long, embedder=_Emb())
+        assert n == 400
+        assert trunc is True
+
+
 class TestPadMatch:
     def test_pad_from_final_length_not_fixed_slots(self):
         assert pad_for_matched_control(20, 20) == 0
@@ -123,3 +161,17 @@ class TestPadMatch:
     def test_append_fill_count(self):
         assert append_fill_count(20, 27) == 7
         assert append_fill_count(20, 20) == 0
+
+    def test_conversation_split_id_stable(self):
+        a = resolve_route_decision(
+            "q1",
+            route_fn=lambda _: route_from_category("semantic"),
+            conversation_id="convo-abc",
+        )
+        b = resolve_route_decision(
+            "q2 totally different text",
+            route_fn=lambda _: route_from_category("semantic"),
+            conversation_id="convo-abc",
+        )
+        # Same conversation → same split prefix/id (not per-query)
+        assert a.split_id == b.split_id
