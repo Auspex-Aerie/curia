@@ -135,9 +135,7 @@ class CodeRetriever:
         return self.store.similarity_search(query, k=k)
 
     def _indexed_sources(self) -> List[str]:
-        if hasattr(self.store, "indexed_sources"):
-            return self.store.indexed_sources()
-        return [c.source for c in self.store.chunks.values()] if self.store.chunks else []
+        return self.store.indexed_sources()
 
     def _resolve_route(self, query: str) -> QueryRoute:
         """Deployed policy via resolve_route_decision (DEC-037+); stores last_route_decision."""
@@ -146,7 +144,7 @@ class CodeRetriever:
             route_fn=self._route_fn if self.config.use_query_router else None,
             use_query_router=self.config.use_query_router,
             rag_used=True,
-            conversation_id=getattr(self.store, "conversation_id", None),
+            conversation_id=self.store.conversation_id,
             indexed_sources=self._indexed_sources(),
         )
         if not self.config.use_query_router:
@@ -386,7 +384,7 @@ class CodeRetriever:
                 route_fn=self._route_fn if self.config.use_query_router else None,
                 use_query_router=self.config.use_query_router,
                 rag_used=False,
-                conversation_id=getattr(self.store, "conversation_id", None),
+                conversation_id=self.store.conversation_id,
                 indexed_sources=self._indexed_sources(),
             )
             return []
@@ -476,6 +474,10 @@ class CodeRetriever:
             len(query),
             elapsed_ms,
             [e.get("citation") for e in entries[:5]],
-            getattr(self.last_route_decision, "decision_stage", None),
+            (
+                self.last_route_decision.decision_stage
+                if self.last_route_decision is not None
+                else None
+            ),
         )
         return context_block, entries, elapsed_ms

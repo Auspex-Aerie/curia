@@ -72,6 +72,16 @@ class TestHybrid:
         amb = ["pkg/a/foo.py", "other/a/foo.py"]
         assert resolve_path_mentions("see a/foo.py", amb) == []
 
+    def test_dotfile_paths_preserved(self):
+        """U1: lstrip('./') must not strip leading dots from .github/..."""
+        q = "open .github/workflows/ci.yml and ./backend/main.py"
+        mentions = extract_path_mentions(q)
+        assert ".github/workflows/ci.yml" in mentions
+        assert "backend/main.py" in mentions
+        assert resolve_path_mentions(
+            q, [".github/workflows/ci.yml", "backend/main.py"]
+        ) == [".github/workflows/ci.yml", "backend/main.py"]
+
     def test_path_seed_selects_query_relevant_chunk_per_file(self):
         create = CodeChunk("c", "backend/routes/turns.py", "create", 1, 5, "function", "create_turn")
         cancel = CodeChunk("x", "backend/routes/turns.py", "cancel", 6, 10, "function", "cancel_turn")

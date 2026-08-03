@@ -309,7 +309,7 @@ async def _deliberation_events(
                 {"model": "system", "response": message},
                 turn.context_sources,
                 metadata=error_meta,
-                route_decision=getattr(turn, "route_decision", None),
+                route_decision=turn.route_decision,
                 caller=agent_id,
                 origin=call_origin,
             )
@@ -334,7 +334,7 @@ async def _deliberation_events(
             stage3,
             turn.context_sources,
             metadata=metadata,
-            route_decision=getattr(turn, "route_decision", None),
+            route_decision=turn.route_decision,
             caller=agent_id,
             origin=call_origin,
         )

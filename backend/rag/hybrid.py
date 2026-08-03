@@ -40,16 +40,20 @@ def readme_demotion_factor(source: str) -> float:
     return 0.55 if README_RE.search(source) else 1.0
 
 
+def _strip_dot_slash_prefix(path: str) -> str:
+    """Remove leading ``./`` only — not every leading ``.`` (U1: keep ``.github/...``)."""
+    if path.startswith("./"):
+        return path[2:]
+    return path
+
+
 def extract_path_mentions(query: str) -> List[str]:
     """Extract path-like user references while preserving mention order."""
     found: List[Tuple[int, str]] = []
     for pattern in (PATH_RE, BARE_FILE_RE):
         for match in pattern.finditer(query):
-            value = (
-                match.group(0)
-                .replace("\\", "/")
-                .lstrip("./")
-                .rstrip(".,;:!?)]}'\"")
+            value = _strip_dot_slash_prefix(
+                match.group(0).replace("\\", "/").rstrip(".,;:!?)]}'\"")
             )
             found.append((match.start(), value))
 
@@ -74,7 +78,7 @@ def resolve_path_mentions(query: str, sources: Iterable[str], limit: int = 8) ->
     by_lower = {source.lower(): source for source in available}
     resolved: List[str] = []
     for mention in extract_path_mentions(query):
-        m = mention.replace("\\", "/").lower().lstrip("./")
+        m = _strip_dot_slash_prefix(mention.replace("\\", "/")).lower()
         match: Optional[str] = by_lower.get(m)
         if match is None:
             # Suffix-tolerant either direction (N7): index root-agnostic.
