@@ -135,6 +135,8 @@ class CodeRetriever:
         return self.store.similarity_search(query, k=k)
 
     def _indexed_sources(self) -> List[str]:
+        if hasattr(self.store, "indexed_sources"):
+            return self.store.indexed_sources()
         return [c.source for c in self.store.chunks.values()] if self.store.chunks else []
 
     def _resolve_route(self, query: str) -> QueryRoute:

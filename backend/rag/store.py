@@ -40,6 +40,7 @@ class ConversationStore:
         self.graph: Optional[CodeGraph] = None
         self.colbert_index: Optional[SemanticIndex] = None
         self.vectorstore: Optional[FAISS] = None
+        self._indexed_sources_cache: Optional[List[str]] = None
 
     def _base_path(self) -> Path:
         return self.data_dir / self.conversation_id
@@ -81,6 +82,7 @@ class ConversationStore:
     ) -> int:
         self.chunks = {c.chunk_id: c for c in chunks}
         self.chunk_order = [c.chunk_id for c in chunks]
+        self._indexed_sources_cache = None
         self.entity_index = EntityIndex.from_chunks(chunks)
         self.graph = CodeGraph.from_chunks(chunks, self.entity_index)
         self.colbert_index = build_semantic_index(chunks, self._colbert_path(), rebuild=True)
@@ -145,6 +147,7 @@ class ConversationStore:
                 payload = pickle.load(f)
             self.chunks = payload.get("chunks", {})
             self.chunk_order = payload.get("order", list(self.chunks.keys()))
+            self._indexed_sources_cache = None
             return bool(self.chunks)
         except Exception:
             logger.exception("Failed to load chunks for %s", self.conversation_id)
@@ -157,11 +160,13 @@ class ConversationStore:
                     payload = pickle.load(f)
                 self.chunks = payload.get("chunks", {})
                 self.chunk_order = payload.get("order", list(self.chunks.keys()))
+                self._indexed_sources_cache = None
             except Exception:
                 logger.exception("Failed to load chunks for %s", self.conversation_id)
                 return False
         elif self.vectorstore is not None:
             self._hydrate_chunks_from_faiss()
+            self._indexed_sources_cache = None
         else:
             return False
 
@@ -255,9 +260,23 @@ class ConversationStore:
             results.append((chunk, score))
         return results
 
+    def indexed_sources(self) -> List[str]:
+        """Cached unique chunk sources for path resolution (N10)."""
+        if self._indexed_sources_cache is None:
+            seen: set[str] = set()
+            out: List[str] = []
+            for c in self.chunks.values():
+                src = c.source
+                if src not in seen:
+                    seen.add(src)
+                    out.append(src)
+            self._indexed_sources_cache = out
+        return self._indexed_sources_cache
+
     def clear(self):
         self.chunks.clear()
         self.chunk_order.clear()
+        self._indexed_sources_cache = None
         self.entity_index = None
         self.graph = None
         self.colbert_index = None

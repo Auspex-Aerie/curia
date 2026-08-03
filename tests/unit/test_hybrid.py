@@ -63,6 +63,15 @@ class TestHybrid:
             "mcp_arena/server.py",
         ]
 
+    def test_resolve_path_suffix_tolerant(self):
+        """N7: full-path mention vs subdirectory-rooted index."""
+        sources = ["arena.py", "run_turn.py", "rag/rerank.py"]
+        query = "compare backend/arena.py and backend/run_turn.py"
+        assert resolve_path_mentions(query, sources) == ["arena.py", "run_turn.py"]
+        # Ambiguous suffix fails closed
+        amb = ["pkg/a/foo.py", "other/a/foo.py"]
+        assert resolve_path_mentions("see a/foo.py", amb) == []
+
     def test_path_seed_selects_query_relevant_chunk_per_file(self):
         create = CodeChunk("c", "backend/routes/turns.py", "create", 1, 5, "function", "create_turn")
         cancel = CodeChunk("x", "backend/routes/turns.py", "cancel", 6, 10, "function", "cancel_turn")

@@ -72,21 +72,36 @@ def estimate_query_tokens(
         return 0, False
     if embedder is not None:
         try:
+            import logging as _logging
+            import warnings
+
             tok = getattr(embedder, "tokenizer", None)
             if tok is None:
                 first = getattr(embedder, "_first_module", None)
                 mod = first() if callable(first) else first
                 tok = getattr(mod, "tokenizer", None) if mod is not None else None
             if tok is not None:
-                # truncation=False so long asks report true length (N1)
-                if hasattr(tok, "__call__"):
-                    encoded = tok(query, truncation=False, add_special_tokens=True)
-                    ids = encoded["input_ids"]
-                    n = len(ids)
-                    return n, n > max_seq
-                if hasattr(tok, "encode"):
-                    n = len(tok.encode(query, add_special_tokens=True))
-                    return n, n > max_seq
+                # truncation=False so long asks report true length (N1).
+                # Suppress HF "sequence longer than max" spam — we never run the
+                # model on this encoding (N9).
+                transformers_log = _logging.getLogger("transformers")
+                prev_level = transformers_log.level
+                transformers_log.setLevel(_logging.ERROR)
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        if hasattr(tok, "__call__"):
+                            encoded = tok(
+                                query, truncation=False, add_special_tokens=True
+                            )
+                            ids = encoded["input_ids"]
+                            n = len(ids)
+                            return n, n > max_seq
+                        if hasattr(tok, "encode"):
+                            n = len(tok.encode(query, add_special_tokens=True))
+                            return n, n > max_seq
+                finally:
+                    transformers_log.setLevel(prev_level)
         except Exception:
             logger.debug("tokenizer estimate failed; char heuristic", exc_info=True)
     n = max(1, (len(query) + 3) // 4)
@@ -128,7 +143,8 @@ class RouteDecision:
     multi_hop_suppressed_by_abs_floor: bool = False
     decision_stage: str = "model"
     split_id: str = "unset"
-    path_mentions: int = 0
+    path_mentions: int = 0  # raw PATH_RE count (telemetry)
+    path_mentions_resolved: int = 0  # index-validated count (override authority, N8)
 
     def to_query_route(self) -> QueryRoute:
         return QueryRoute(
@@ -360,7 +376,8 @@ def resolve_route_decision(
         multi_hop_suppressed_by_abs_floor=multi_hop_suppressed,
         decision_stage=stage,
         split_id=split,
-        path_mentions=n_raw,  # raw PATH_RE telemetry; override uses resolved count
+        path_mentions=n_raw,
+        path_mentions_resolved=n_paths,
     )
 
 

@@ -60,6 +60,7 @@ class TestPrecedence:
         )
         assert d.override_fired is False
         assert d.path_mentions >= 1  # raw PATH_RE still sees them
+        assert d.path_mentions_resolved == 0
         assert d.use_graph_append is False  # architectural stays graph-off
 
     def test_path_plus_multihop_composes(self):
