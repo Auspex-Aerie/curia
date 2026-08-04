@@ -23,6 +23,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      # Modules no test imports (e.g. standalone CLI entry points) can otherwise
+      # stay syntactically broken with the suite fully green — see INC-009.
+      - name: Compile check
+        run: uv run python -m compileall -q backend mcp_arena RAGRouter
+
       - name: Unit tests
         run: uv run pytest tests/unit RAGRouter/Training/tests -q -m "not eval"
 

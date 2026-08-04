@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from backend.rag.hybrid import is_multihop_trace_query, is_trace_query
 from backend.rag.query_router import route_from_category, route_query_regex
+import pytest
+
 from backend.rag.route_decision import (
+    MatchedArmsLengthError,
     append_fill_count,
     build_padded_control_slice,
     estimate_query_tokens,
     pad_for_matched_control,
     resolve_route_decision,
+    safe_matched_pair_or_drop,
 )
 
 
@@ -162,6 +166,46 @@ class TestPadMatch:
     def test_append_fill_count(self):
         assert append_fill_count(20, 27) == 7
         assert append_fill_count(20, 20) == 0
+
+
+class TestDroppedPairAccounting:
+    """Dropped pairs are not a random sample — the harness must be able to count them."""
+
+    def test_success_returns_no_drop_record(self):
+        on, off, drop = safe_matched_pair_or_drop(lambda: (["a", "b"], ["c", "d"]))
+        assert on == ["a", "b"]
+        assert off == ["c", "d"]
+        assert drop is None
+
+    def test_length_mismatch_returns_structured_drop_record(self):
+        def build():
+            raise MatchedArmsLengthError(
+                "DEC-042 length match failed: control 24 != treatment 27",
+                control_len=24,
+                treatment_len=27,
+                pad_i=7,
+                rerank_top_k=20,
+            )
+
+        on, off, drop = safe_matched_pair_or_drop(build)
+        assert on is None and off is None
+        # append_fill is the signal that makes drop bias detectable: pool exhaustion
+        # correlates with queries where graph expansion did the most work.
+        assert drop == {
+            "reason": "length_mismatch",
+            "control_len": 24,
+            "treatment_len": 27,
+            "pad_i": 7,
+            "rerank_top_k": 20,
+            "append_fill": 7,
+        }
+
+    def test_unrelated_assertion_still_propagates(self):
+        def build():
+            raise AssertionError("something else entirely")
+
+        with pytest.raises(AssertionError, match="something else"):
+            safe_matched_pair_or_drop(build)
 
     def test_conversation_split_id_stable(self):
         a = resolve_route_decision(

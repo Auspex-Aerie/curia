@@ -423,7 +423,11 @@ class CodeRetriever:
         if len(control) != len(graph_on):
             raise MatchedArmsLengthError(
                 f"DEC-042 length match failed: control {len(control)} != treatment {len(graph_on)} "
-                f"(pad_i={pad_i}, rerank_top_k={self.rerank_top_k})"
+                f"(pad_i={pad_i}, rerank_top_k={self.rerank_top_k})",
+                control_len=len(control),
+                treatment_len=len(graph_on),
+                pad_i=pad_i,
+                rerank_top_k=self.rerank_top_k,
             )
         return graph_on, control
 
@@ -457,7 +461,12 @@ class CodeRetriever:
         result = apply_ast_aware_cap(pre, min(self.context_chunk_cap, target_len))
         if len(result) != len(on):
             raise MatchedArmsLengthError(
-                f"DEC-042 length match failed: control {len(result)} != treatment {len(on)}"
+                f"DEC-042 length match failed: control {len(result)} != treatment {len(on)} "
+                f"(pad_i={pad_i}, rerank_top_k={self.rerank_top_k})",
+                control_len=len(result),
+                treatment_len=len(on),
+                pad_i=pad_i,
+                rerank_top_k=self.rerank_top_k,
             )
         return result
 

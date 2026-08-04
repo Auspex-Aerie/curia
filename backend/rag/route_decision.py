@@ -382,23 +382,60 @@ def resolve_route_decision(
 
 
 class MatchedArmsLengthError(AssertionError):
-    """DEC-042 length mismatch — harness should catch, drop pair, continue (N5)."""
+    """DEC-042 length mismatch — harness should catch, drop pair, continue (N5).
+
+    Carries structured diagnostics because **dropped pairs are not a random
+    sample**: exhaustion correlates with large ``pad_i`` (queries where graph
+    expansion did the most work). Silently dropping the graph-richest pairs
+    biases the null-exit toward "no effect" and would fire `DEF-017` on an
+    artifact. Callers must accumulate these and report the drop rate alongside
+    the append-fill distribution (`DEC-042` §2).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        control_len: int,
+        treatment_len: int,
+        pad_i: int,
+        rerank_top_k: int,
+    ):
+        super().__init__(message)
+        self.control_len = control_len
+        self.treatment_len = treatment_len
+        self.pad_i = pad_i
+        self.rerank_top_k = rerank_top_k
+
+    @property
+    def append_fill(self) -> int:
+        """Chunks the graph actually appended on the dropped treatment arm."""
+        return max(0, self.treatment_len - self.rerank_top_k)
+
+    def to_drop_record(self) -> Dict[str, Any]:
+        return {
+            "reason": "length_mismatch",
+            "control_len": self.control_len,
+            "treatment_len": self.treatment_len,
+            "pad_i": self.pad_i,
+            "rerank_top_k": self.rerank_top_k,
+            "append_fill": self.append_fill,
+        }
 
 
 def safe_matched_pair_or_drop(
     build_fn: Any,
-) -> Tuple[Optional[Any], Optional[Any], Optional[str]]:
-    """Run a matched-arms builder; on length assert return drop reason instead of abort."""
+) -> Tuple[Optional[Any], Optional[Any], Optional[Dict[str, Any]]]:
+    """Run a matched-arms builder; on length mismatch return a structured drop record.
+
+    Third element is ``None`` on success, else a dict the harness must count —
+    see `MatchedArmsLengthError` on why the drop set is biased.
+    """
     try:
         on, off = build_fn()
         return on, off, None
     except MatchedArmsLengthError as exc:
-        return None, None, str(exc)
-    except AssertionError as exc:
-        msg = str(exc)
-        if "DEC-042" in msg or "length match" in msg:
-            return None, None, msg
-        raise
+        return None, None, exc.to_drop_record()
 
 
 def pad_for_matched_control(

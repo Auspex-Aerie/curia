@@ -70,7 +70,8 @@ def main():
         print()
 
     print("=== Context summary ===")
-    for entry in entries:        tag = entry.get("source_type", "").upper() or "RAG"
+    for entry in entries:
+        tag = entry.get("source_type", "").upper() or "RAG"
         score = entry.get("score")
         meta = [f"lines={entry.get('lines')}", f"bytes={entry.get('bytes')}", f"tokens~{entry.get('est_tokens')}"]
         if score is not None:
