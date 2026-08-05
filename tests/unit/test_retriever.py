@@ -151,6 +151,10 @@ class TestCodeRetriever:
 
     def test_multiple_explicit_paths_override_architectural_no_graph_route(self, tmp_path):
         store = ConversationStore("route-convo", tmp_path, _FakeEmbedder())
+        a = _chunk("a", "a", "a", "backend/a.py")
+        b = _chunk("b", "b", "b", "backend/b.py")
+        store.chunks = {"a": a, "b": b}
+        store.chunk_order = ["a", "b"]
         retriever = CodeRetriever(
             store,
             config=RetrievalConfig(use_query_router=True),
@@ -159,6 +163,48 @@ class TestCodeRetriever:
         route = retriever._resolve_route("Compare backend/a.py with backend/b.py")
         assert route.category == "cross_file"
         assert route.use_graph_append is True
+
+    def test_matched_arms_treatment_equals_retrieve_ranked(self, tmp_path):
+        """N4: treatment arm must be the deployed retrieve_ranked path."""
+        alpha = _chunk("a", "alpha", "alpha logic", "alpha.py")
+        beta = _chunk("b", "beta", "beta logic", "beta.py")
+        paths = [
+            _chunk("p0", "s0", "c0", "mcp_arena/server.py"),
+            _chunk("p1", "s1", "c1", "mcp_arena/client.py"),
+        ]
+        all_chunks = [alpha, beta, *paths]
+        store = ConversationStore("match-convo", tmp_path, _FakeEmbedder())
+        store.chunks = {c.chunk_id: c for c in all_chunks}
+        store.chunk_order = [c.chunk_id for c in all_chunks]
+        store.entity_index = EntityIndex.from_chunks(all_chunks)
+        store.graph = CodeGraph.from_chunks(all_chunks, store.entity_index)
+
+        class FakeSemantic:
+            def search(self, _query, k=10):
+                return [(alpha, 0.9), (beta, 0.5)] + [(p, 0.2) for p in paths]
+
+        store.colbert_index = FakeSemantic()
+        reranker = CrossEncoderReranker(
+            score_fn=lambda q, d: 0.9 if "alpha" in d else 0.5,
+            enabled=True,
+        )
+        retriever = CodeRetriever(
+            store,
+            reranker=reranker,
+            retrieve_candidates=10,
+            rerank_top_k=3,
+            config=RetrievalConfig(
+                fusion_mode="rrf",
+                graph_mode="append",
+                use_query_router=False,
+                use_graph=True,
+            ),
+        )
+        q = "Trace mcp_arena/server.py and mcp_arena/client.py for alpha"
+        on = retriever.retrieve_ranked(q)
+        matched_on, control = retriever.retrieve_matched_arms(q)
+        assert [c.chunk_id for c, _ in matched_on] == [c.chunk_id for c, _ in on]
+        assert len(control) == len(matched_on)
 
     def test_parent_display_content_is_deduplicated(self):
         parent = _chunk("parent", "Service", "class Service: ...", "service.py")

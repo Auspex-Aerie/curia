@@ -2,13 +2,20 @@
 
 import re
 from pathlib import PurePosixPath
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from .entity_index import EntityIndex
 from .types import CodeChunk
 
 README_RE = re.compile(r"(^|/)readme(\.|$)", re.IGNORECASE)
+# Broad historical pattern (legacy callers / hybrid seed heuristics).
+# Do NOT use for multi-hop graph policy — see MULTIHOP_TRACE_RE (DEC-039/041).
 TRACE_RE = re.compile(r"\b(trace|call\s*chain|how\s+does|where\s+is|who\s+calls)\b", re.IGNORECASE)
+# Router multi-hop gate only — excludes how does / where is / who calls (HYP-002 defect).
+MULTIHOP_TRACE_RE = re.compile(
+    r"\b(trace|call\s*chain|call\s*graph|data\s+flow\s+through)\b",
+    re.IGNORECASE,
+)
 PATH_RE = re.compile(
     r"(?<![\w.-])(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9_+-]+)?"
 )
@@ -20,11 +27,24 @@ CODE_IDENTIFIER_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b")
 
 
 def is_trace_query(query: str) -> bool:
+    """Legacy broad matcher. Prefer is_multihop_trace_query for graph_trace policy."""
     return bool(TRACE_RE.search(query))
+
+
+def is_multihop_trace_query(query: str) -> bool:
+    """DEC-039/041: narrow multi-hop intent for router graph_trace."""
+    return bool(MULTIHOP_TRACE_RE.search(query))
 
 
 def readme_demotion_factor(source: str) -> float:
     return 0.55 if README_RE.search(source) else 1.0
+
+
+def _strip_dot_slash_prefix(path: str) -> str:
+    """Remove leading ``./`` only — not every leading ``.`` (U1: keep ``.github/...``)."""
+    if path.startswith("./"):
+        return path[2:]
+    return path
 
 
 def extract_path_mentions(query: str) -> List[str]:
@@ -32,11 +52,8 @@ def extract_path_mentions(query: str) -> List[str]:
     found: List[Tuple[int, str]] = []
     for pattern in (PATH_RE, BARE_FILE_RE):
         for match in pattern.finditer(query):
-            value = (
-                match.group(0)
-                .replace("\\", "/")
-                .lstrip("./")
-                .rstrip(".,;:!?)]}'\"")
+            value = _strip_dot_slash_prefix(
+                match.group(0).replace("\\", "/").rstrip(".,;:!?)]}'\"")
             )
             found.append((match.start(), value))
 
@@ -51,20 +68,41 @@ def extract_path_mentions(query: str) -> List[str]:
 
 
 def resolve_path_mentions(query: str, sources: Iterable[str], limit: int = 8) -> List[str]:
-    """Resolve explicit query paths against indexed sources; bare names must be unique."""
+    """Resolve explicit query paths against indexed sources; bare names must be unique.
+
+    Suffix-tolerant (N7): a mention resolves when exactly one indexed source equals
+    it or ends with ``/{mention}`` (root-agnostic either direction). Ambiguity
+    fails closed (0 matches kept).
+    """
     available = list(dict.fromkeys(source.replace("\\", "/") for source in sources))
     by_lower = {source.lower(): source for source in available}
     resolved: List[str] = []
     for mention in extract_path_mentions(query):
-        match = by_lower.get(mention.lower())
-        if match is None and "/" not in mention:
-            basename_matches = [
-                source
-                for source in available
-                if PurePosixPath(source).name.lower() == mention.lower()
-            ]
-            if len(basename_matches) == 1:
-                match = basename_matches[0]
+        m = _strip_dot_slash_prefix(mention.replace("\\", "/")).lower()
+        match: Optional[str] = by_lower.get(m)
+        if match is None:
+            # Suffix-tolerant either direction (N7): index root-agnostic.
+            # - source ends with /mention  (mention is relative, index has prefix)
+            # - mention ends with /source (user wrote full path, index is subdir-rooted)
+            candidates = []
+            for source in available:
+                s = source.lower()
+                if (
+                    s == m
+                    or s.endswith(f"/{m}")
+                    or m.endswith(f"/{s}")
+                ):
+                    candidates.append(source)
+            if len(candidates) == 1:
+                match = candidates[0]
+            elif not candidates and "/" not in m:
+                basename_matches = [
+                    source
+                    for source in available
+                    if PurePosixPath(source).name.lower() == m
+                ]
+                if len(basename_matches) == 1:
+                    match = basename_matches[0]
         if match is not None and match not in resolved:
             resolved.append(match)
         if len(resolved) >= limit:

@@ -122,6 +122,7 @@ class TurnService:
             context_token_map=dict(ctx.context_token_map or {}),
             context_block=ctx.context_block,
             context_sources=list(ctx.context_sources or []),
+            route_decision=dict(ctx.route_decision) if ctx.route_decision else None,
             directives=ctx.directives.dict(),
             warnings=list(ctx.warnings or []),
             arena_models=list(arena_models),
@@ -340,6 +341,7 @@ class TurnService:
                 arena_models=ckpt.arena_models,
                 chairman_model=ckpt.chairman_model,
             ),
+            route_decision=ckpt.route_decision,
         )
         return turn
 

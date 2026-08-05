@@ -185,6 +185,8 @@ async def _deliberation_events(
 
         if context.context_sources:
             yield _sse("rag_context", data=context.context_sources)
+        if context.route_decision:
+            yield _sse("route_decision", data=context.route_decision)
         if context.summarize_targets:
             yield _sse(
                 "summarization",
@@ -307,6 +309,7 @@ async def _deliberation_events(
                 {"model": "system", "response": message},
                 turn.context_sources,
                 metadata=error_meta,
+                route_decision=turn.route_decision,
                 caller=agent_id,
                 origin=call_origin,
             )
@@ -331,6 +334,7 @@ async def _deliberation_events(
             stage3,
             turn.context_sources,
             metadata=metadata,
+            route_decision=turn.route_decision,
             caller=agent_id,
             origin=call_origin,
         )

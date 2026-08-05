@@ -78,6 +78,7 @@ class ContextResult:
     component_budgets: Dict[str, PromptComponentBudget] = field(default_factory=dict)
     context_from_last_chair: bool = False
     warnings: List[str] = field(default_factory=list)
+    route_decision: Optional[Dict[str, Any]] = None
 
 
 class ContextEngine:
@@ -129,6 +130,7 @@ class ContextEngine:
                 directive_instructions="",
                 mode_instructions="",
                 warnings=list(directives.warnings),
+                route_decision=None,
             )
 
         # Apply @temp/@maxtokens to summarizer calls during budget construction.
@@ -164,6 +166,7 @@ class ContextEngine:
         context_block = ""
         context_sources: List[Dict[str, Any]] = []
         context_from_last_chair = False
+        route_decision: Optional[Dict[str, Any]] = None
 
         if directives.use_last_chair and conversation is not None:
             context_block, context_sources, _ = get_last_chair_context(conversation)
@@ -177,13 +180,18 @@ class ContextEngine:
                 )
 
         if not context_block:
-            context_block, context_sources = await asyncio.to_thread(
+            ctx_out = await asyncio.to_thread(
                 self.rag_provider.get_context,
                 conversation_id,
                 clean_query,
                 manual_context,
                 not directives.skip_rag,
             )
+            # Backward-compatible: 2-tuple or 3-tuple providers
+            if len(ctx_out) == 3:
+                context_block, context_sources, route_decision = ctx_out
+            else:
+                context_block, context_sources = ctx_out  # type: ignore[misc]
 
         rag_used = (
             len(manual_context) == 0
@@ -192,6 +200,18 @@ class ContextEngine:
         )
         if not context_block:
             context_sources = []
+        if route_decision is not None:
+            route_decision = dict(route_decision)
+            route_decision["rag_used"] = bool(rag_used and context_block)
+        elif not rag_used:
+            # Log route even when RAG skipped (DEC-037 survivorship fix)
+            from .rag.route_decision import resolve_route_decision
+
+            route_decision = resolve_route_decision(
+                clean_query,
+                rag_used=False,
+                conversation_id=conversation_id,
+            ).to_dict()
 
         directive_instructions = build_directive_instructions(directives)
         mode_instructions = build_mode_instructions(mode)
@@ -277,6 +297,7 @@ class ContextEngine:
             mode_instructions=mode_instructions,
             budget_decisions=budget_decisions,
             summarize_jobs=summarize_jobs,
+            route_decision=route_decision,
             component_budgets=component_budgets,
             context_from_last_chair=context_from_last_chair,
             warnings=warnings,

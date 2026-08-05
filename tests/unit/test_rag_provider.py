@@ -101,9 +101,10 @@ class TestNullRAGProvider:
 
     def test_get_context_returns_empty_tuple(self, provider):
         """get_context should return empty context block and sources."""
-        context, sources = provider.get_context("conv-123", "test query")
+        context, sources, route = provider.get_context("conv-123", "test query")
         assert context == ""
         assert sources == []
+        assert route is None
 
     def test_is_indexed_returns_false(self, provider):
         """is_indexed should always return False."""

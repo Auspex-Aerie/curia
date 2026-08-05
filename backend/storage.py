@@ -56,6 +56,7 @@ class _StorageCompatibility:
         stage3: dict[str, Any],
         context_sources: list[dict[str, Any]] | None = None,
         metadata: dict[str, Any] | None = None,
+        route_decision: dict[str, Any] | None = None,
     ) -> None:
         self.service.add_assistant_message(
             conversation_id,
@@ -64,6 +65,7 @@ class _StorageCompatibility:
             stage3,
             context_sources,
             metadata,
+            route_decision=route_decision,
         )
 
     def update_conversation_title(self, conversation_id: str, title: str) -> None:

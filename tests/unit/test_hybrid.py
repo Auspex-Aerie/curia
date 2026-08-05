@@ -4,6 +4,7 @@ from backend.rag.entity_index import EntityIndex
 from backend.rag.hybrid import (
     apply_readme_demotion,
     extract_path_mentions,
+    is_multihop_trace_query,
     is_trace_query,
     readme_demotion_factor,
     resolve_path_mentions,
@@ -22,6 +23,8 @@ class TestHybrid:
     def test_trace_query_detection(self):
         assert is_trace_query("trace the call chain for auth")
         assert not is_trace_query("what is a widget")
+        assert is_multihop_trace_query("trace the call chain for auth")
+        assert not is_multihop_trace_query("where is authenticate defined")
 
     def test_seed_chunks_from_symbol(self):
         chunk = CodeChunk(
@@ -59,6 +62,25 @@ class TestHybrid:
             "mcp_arena/client.py",
             "mcp_arena/server.py",
         ]
+
+    def test_resolve_path_suffix_tolerant(self):
+        """N7: full-path mention vs subdirectory-rooted index."""
+        sources = ["arena.py", "run_turn.py", "rag/rerank.py"]
+        query = "compare backend/arena.py and backend/run_turn.py"
+        assert resolve_path_mentions(query, sources) == ["arena.py", "run_turn.py"]
+        # Ambiguous suffix fails closed
+        amb = ["pkg/a/foo.py", "other/a/foo.py"]
+        assert resolve_path_mentions("see a/foo.py", amb) == []
+
+    def test_dotfile_paths_preserved(self):
+        """U1: lstrip('./') must not strip leading dots from .github/..."""
+        q = "open .github/workflows/ci.yml and ./backend/main.py"
+        mentions = extract_path_mentions(q)
+        assert ".github/workflows/ci.yml" in mentions
+        assert "backend/main.py" in mentions
+        assert resolve_path_mentions(
+            q, [".github/workflows/ci.yml", "backend/main.py"]
+        ) == [".github/workflows/ci.yml", "backend/main.py"]
 
     def test_path_seed_selects_query_relevant_chunk_per_file(self):
         create = CodeChunk("c", "backend/routes/turns.py", "create", 1, 5, "function", "create_turn")
