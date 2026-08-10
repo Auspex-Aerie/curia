@@ -66,3 +66,27 @@ class TestHyp003Smoke:
         assert result["def017_eligible"] is False
         assert "append_fill" in result
         assert "histogram" in result["append_fill"]
+
+
+class TestDef017Guard:
+    def test_cli_refuses_allow_def017_with_fixture_gold(self, tmp_path):
+        from backend.run_hyp003 import main
+
+        # Real-looking repo path + fixture gold must not enable DEF-017
+        rc = main(
+            [
+                "--repo",
+                str(GOLDEN_REPO),
+                "--gold",
+                str(SMOKE_GOLD),
+                "--fixture-ok",
+                "--allow-def017",
+                "--reranker",
+                "mock",
+                "--colbert",
+                "hash",
+                "--output",
+                str(tmp_path / "out.json"),
+            ]
+        )
+        assert rc == 2

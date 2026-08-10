@@ -72,14 +72,31 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     repo_resolved = args.repo.resolve()
-    is_fixture = "tests/fixtures" in str(repo_resolved) or repo_resolved.name == "golden_repo"
-    if is_fixture and not args.fixture_ok:
+    gold_resolved = args.gold.resolve()
+    # Greptile P1: eligibility must check *both* repo and gold provenance.
+    # A real --repo with fixture/toy gold must never mark DEF-017 eligible.
+    is_fixture_repo = (
+        "tests/fixtures" in str(repo_resolved) or repo_resolved.name == "golden_repo"
+    )
+    is_fixture_gold = (
+        "tests/fixtures" in str(gold_resolved)
+        or "fixture" in gold_resolved.name.lower()
+        or "smoke" in gold_resolved.name.lower()
+    )
+    if is_fixture_repo and not args.fixture_ok:
         print(
             "Refusing fixture repo without --fixture-ok (DEF-017 cannot fire on toys).",
             file=sys.stderr,
         )
         return 2
-    allow_def017 = bool(args.allow_def017) and not is_fixture
+    if args.allow_def017 and is_fixture_gold:
+        print(
+            "Refusing --allow-def017 with fixture/toy gold "
+            f"({gold_resolved.name}). Use production gold outside tests/fixtures.",
+            file=sys.stderr,
+        )
+        return 2
+    allow_def017 = bool(args.allow_def017) and not is_fixture_repo and not is_fixture_gold
 
     print(
         f"HYP-003: repo={args.repo} gold={args.gold.name} n={len(gold)} "

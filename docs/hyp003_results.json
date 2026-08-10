@@ -505,6 +505,6 @@
     "colbert_mode": "hash",
     "force_graph_on": true
   },
-  "run_at": "2026-08-10T12:46:26.214469+00:00",
+  "run_at": "2026-08-10T13:02:26.019065+00:00",
   "gold_path": "tests/fixtures/hyp003_file_gold_v1.json"
 }
