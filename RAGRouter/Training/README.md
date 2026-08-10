@@ -45,6 +45,22 @@ uv run python -m backend.run_hyp003 \
 Gold schema: `relevant_files`, optional `needs_multi_hop`, `author`, `date`, `notes`.
 See `docs/PIPELINE.md` and PLAN §7.6.
 
+### Visual gold mining (human + AI)
+
+```bash
+# Propose candidates from index (skips files already in gold)
+uv run python RAGRouter/Training/scripts/gold_mine_candidates.py \
+  --repo backend \
+  --existing-gold tests/fixtures/hyp003_file_gold_v1.json \
+  --max-files 40
+
+# Open offline review board (no server)
+xdg-open RAGRouter/Training/data/gold_review/gold_review.html   # or open on macOS
+```
+
+In the board: edit queries, set multi-hop/policy, **Accept** rows → **Download accepted JSON**.
+Merge into the main gold file; when n≥60 set `"def017_eligible_gold": true` for powered runs.
+
 ## Legacy Stage A+B (Claude Code logs) — archive / research only
 
 ```bash
