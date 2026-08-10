@@ -11,6 +11,42 @@ from pathlib import Path
 from .rag.eval_hyp003 import load_file_gold, run_hyp003_null_exit
 
 
+def _is_fixture_repo(path: Path) -> bool:
+    resolved = path.resolve()
+    return "tests/fixtures" in str(resolved) or resolved.name == "golden_repo"
+
+
+def _is_fixture_gold_path(path: Path) -> bool:
+    resolved = path.resolve()
+    name = resolved.name.lower()
+    return (
+        "tests/fixtures" in str(resolved)
+        or "fixture" in name
+        or "smoke" in name
+        or "toy" in name
+    )
+
+
+def _gold_content_allows_def017(gold_path: Path) -> bool:
+    """Content-level provenance (Greptile P1 follow-up).
+
+    Path/name checks alone fail when toy gold is copied outside tests/fixtures
+    under a neutral name. Production gold must opt in via schema field.
+    """
+    try:
+        raw = json.loads(gold_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(raw, dict):
+        # Bare list has no provenance metadata — never DEF-017.
+        return False
+    if raw.get("def017_eligible_gold") is True:
+        return True
+    if str(raw.get("gold_class", "")).casefold() in {"production", "powered"}:
+        return True
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
@@ -71,32 +107,39 @@ def main(argv: list[str] | None = None) -> int:
         print("gold file is empty", file=sys.stderr)
         return 1
 
-    repo_resolved = args.repo.resolve()
-    gold_resolved = args.gold.resolve()
-    # Greptile P1: eligibility must check *both* repo and gold provenance.
-    # A real --repo with fixture/toy gold must never mark DEF-017 eligible.
-    is_fixture_repo = (
-        "tests/fixtures" in str(repo_resolved) or repo_resolved.name == "golden_repo"
-    )
-    is_fixture_gold = (
-        "tests/fixtures" in str(gold_resolved)
-        or "fixture" in gold_resolved.name.lower()
-        or "smoke" in gold_resolved.name.lower()
-    )
+    is_fixture_repo = _is_fixture_repo(args.repo)
+    is_fixture_gold_path = _is_fixture_gold_path(args.gold)
+    gold_opts_in = _gold_content_allows_def017(args.gold)
     if is_fixture_repo and not args.fixture_ok:
         print(
             "Refusing fixture repo without --fixture-ok (DEF-017 cannot fire on toys).",
             file=sys.stderr,
         )
         return 2
-    if args.allow_def017 and is_fixture_gold:
+    if args.allow_def017 and (
+        is_fixture_repo or is_fixture_gold_path or not gold_opts_in
+    ):
+        reasons = []
+        if is_fixture_repo:
+            reasons.append("fixture repo")
+        if is_fixture_gold_path:
+            reasons.append(f"fixture/toy gold path ({args.gold.name})")
+        if not gold_opts_in:
+            reasons.append(
+                "gold JSON missing def017_eligible_gold=true (or gold_class=production)"
+            )
         print(
-            "Refusing --allow-def017 with fixture/toy gold "
-            f"({gold_resolved.name}). Use production gold outside tests/fixtures.",
+            "Refusing --allow-def017: " + "; ".join(reasons) + ".",
             file=sys.stderr,
         )
         return 2
-    allow_def017 = bool(args.allow_def017) and not is_fixture_repo and not is_fixture_gold
+    # All three: flag, real repo, real gold path, and explicit content opt-in.
+    allow_def017 = (
+        bool(args.allow_def017)
+        and not is_fixture_repo
+        and not is_fixture_gold_path
+        and gold_opts_in
+    )
 
     print(
         f"HYP-003: repo={args.repo} gold={args.gold.name} n={len(gold)} "

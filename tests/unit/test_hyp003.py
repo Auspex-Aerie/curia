@@ -90,3 +90,39 @@ class TestDef017Guard:
             ]
         )
         assert rc == 2
+
+    def test_cli_refuses_renamed_toy_gold_without_opt_in(self, tmp_path):
+        """Greptile: renamed toy gold outside fixtures still blocked."""
+        from backend.run_hyp003 import main
+
+        # Copy smoke rows to neutral path without fixture/smoke in name
+        import json
+        from pathlib import Path
+
+        payload = json.loads(SMOKE_GOLD.read_text(encoding="utf-8"))
+        payload.pop("def017_eligible_gold", None)
+        payload["gold_class"] = "seed"
+        # Keep description without opt-in
+        neutral = tmp_path / "curia_gold_v2.json"
+        neutral.write_text(json.dumps(payload), encoding="utf-8")
+        # Use a non-fixture directory as fake "real" repo: the golden_repo still
+        # needs --fixture-ok; instead point repo at backend if present.
+        backend = Path(__file__).resolve().parents[2] / "backend"
+        if not backend.is_dir():
+            return
+        rc = main(
+            [
+                "--repo",
+                str(backend),
+                "--gold",
+                str(neutral),
+                "--allow-def017",
+                "--reranker",
+                "mock",
+                "--colbert",
+                "hash",
+                "--output",
+                str(tmp_path / "out2.json"),
+            ]
+        )
+        assert rc == 2

@@ -1,5 +1,7 @@
 {
   "schema": "hyp003_file_gold/v1",
+  "def017_eligible_gold": false,
+  "gold_class": "fixture",
   "description": "Toy golden_repo only — descriptive smoke for the harness. Never allow_def017.",
   "queries": [
     {

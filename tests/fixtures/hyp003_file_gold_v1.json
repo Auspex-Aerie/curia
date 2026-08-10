@@ -1,6 +1,8 @@
 {
   "schema": "hyp003_file_gold/v1",
-  "description": "File-level relevance gold for HYP-003 null-exit. relevant_files only (not symbols). needs_multi_hop for multi-hop retirement gate. Expand toward n≥60 before allow_def017.",
+  "def017_eligible_gold": false,
+  "gold_class": "seed",
+  "description": "File-level relevance gold for HYP-003 null-exit. relevant_files only (not symbols). needs_multi_hop for multi-hop retirement gate. Expand toward n≥60 then set def017_eligible_gold=true before --allow-def017.",
   "queries": [
     {
       "id": "c001",
