@@ -1,0 +1,316 @@
+{
+  "schema": "hyp003_file_gold/v1",
+  "def017_eligible_gold": false,
+  "gold_class": "seed",
+  "description": "File-level relevance gold for HYP-003 null-exit. relevant_files only (not symbols). needs_multi_hop for multi-hop retirement gate. Expand toward n≥60 then set def017_eligible_gold=true before --allow-def017.",
+  "queries": [
+    {
+      "id": "c001",
+      "query": "where is the query router embedding centroid logic",
+      "relevant_files": ["backend/rag/query_router.py"],
+      "needs_multi_hop": false,
+      "policy": "graph_off",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: query_router.py"
+    },
+    {
+      "id": "c002",
+      "query": "how does resolve_route_decision decide path override and multi-hop",
+      "relevant_files": ["backend/rag/route_decision.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: route_decision.py"
+    },
+    {
+      "id": "c003",
+      "query": "CodeRetriever retrieve_matched_arms force graph on",
+      "relevant_files": ["backend/rag/retriever.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: retriever.py"
+    },
+    {
+      "id": "c004",
+      "query": "trace call chain for resolve_route_decision through retrieve",
+      "relevant_files": [
+        "backend/rag/route_decision.py",
+        "backend/rag/retriever.py",
+        "backend/rag/query_router.py"
+      ],
+      "needs_multi_hop": true,
+      "policy": "trace",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "multi-hop intent; files that implement the path"
+    },
+    {
+      "id": "c005",
+      "query": "where is extract_path_mentions and resolve_path_mentions",
+      "relevant_files": ["backend/rag/hybrid.py"],
+      "needs_multi_hop": false,
+      "policy": "graph_off",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: hybrid.py"
+    },
+    {
+      "id": "c006",
+      "query": "RRF fusion of semantic and entity ranked lists",
+      "relevant_files": ["backend/rag/fusion.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: fusion.py"
+    },
+    {
+      "id": "c007",
+      "query": "code graph neighbors_1hop and append-only expansion",
+      "relevant_files": ["backend/rag/graph.py", "backend/rag/retriever.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: graph.py"
+    },
+    {
+      "id": "c008",
+      "query": "where is CrossEncoderReranker create_reranker",
+      "relevant_files": ["backend/rag/rerank.py"],
+      "needs_multi_hop": false,
+      "policy": "graph_off",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: rerank.py"
+    },
+    {
+      "id": "c009",
+      "query": "chunk_repository and AST aware chunking",
+      "relevant_files": ["backend/rag/chunker.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: chunker.py"
+    },
+    {
+      "id": "c010",
+      "query": "ConversationStore FAISS and colbert sidecars",
+      "relevant_files": ["backend/rag/store.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: store.py"
+    },
+    {
+      "id": "c011",
+      "query": "prepare_context directives skip_rag and route_decision",
+      "relevant_files": ["backend/context_engine.py", "backend/rag/route_decision.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: context_engine.py"
+    },
+    {
+      "id": "c012",
+      "query": "run_turn add_assistant_message route_decision persistence",
+      "relevant_files": ["backend/run_turn.py", "backend/storage_service.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: run_turn + storage_service"
+    },
+    {
+      "id": "c013",
+      "query": "where is StorageService atomic conversation mutation",
+      "relevant_files": ["backend/storage_service.py"],
+      "needs_multi_hop": false,
+      "policy": "graph_off",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: storage_service.py"
+    },
+    {
+      "id": "c014",
+      "query": "session catalog SQLite projection rebuild",
+      "relevant_files": ["backend/session_catalog.py", "backend/session_projection.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: session_*"
+    },
+    {
+      "id": "c015",
+      "query": "execution_trace topology edges and step ids",
+      "relevant_files": ["backend/execution_trace.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: execution_trace.py"
+    },
+    {
+      "id": "c016",
+      "query": "prompt_provenance typed parts and RAG event refs",
+      "relevant_files": ["backend/prompt_provenance.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: prompt_provenance.py"
+    },
+    {
+      "id": "c017",
+      "query": "arena council ranking and chair synthesis",
+      "relevant_files": ["backend/arena.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: arena.py"
+    },
+    {
+      "id": "c018",
+      "query": "squad plan compute projected calls soft confirm",
+      "relevant_files": ["backend/squad_plan.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: squad_plan.py"
+    },
+    {
+      "id": "c019",
+      "query": "execution_quality gate assess_from_response_dict",
+      "relevant_files": ["backend/execution_quality.py"],
+      "needs_multi_hop": false,
+      "policy": "graph_off",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: execution_quality.py"
+    },
+    {
+      "id": "c020",
+      "query": "FastAPI main app routers CORS construction",
+      "relevant_files": ["backend/main.py"],
+      "needs_multi_hop": false,
+      "policy": "architectural",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "overview; graph-off architectural"
+    },
+    {
+      "id": "c021",
+      "query": "conversations SSE deliberation stream route_decision event",
+      "relevant_files": ["backend/routes/conversations.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: routes/conversations.py"
+    },
+    {
+      "id": "c022",
+      "query": "HYP-002 eval harness router_accuracy and answer_slot_purity",
+      "relevant_files": ["backend/rag/eval_hyp002.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: eval_hyp002.py"
+    },
+    {
+      "id": "c023",
+      "query": "build_eval_store WeakBiEncoder golden indexing",
+      "relevant_files": ["backend/rag/eval.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: eval.py"
+    },
+    {
+      "id": "c024",
+      "query": "parse_directives skip_rag force_summarize budget_override",
+      "relevant_files": ["backend/directives.py"],
+      "needs_multi_hop": false,
+      "policy": "graph_off",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: directives.py"
+    },
+    {
+      "id": "c025",
+      "query": "where is budget allocator build_budgeted_prompts",
+      "relevant_files": ["backend/budget.py", "backend/component_budget.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: budget modules"
+    },
+    {
+      "id": "c026",
+      "query": "ColBERT learned late interaction index build",
+      "relevant_files": ["backend/rag/colbert.py", "backend/rag/colbert_learned.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: colbert*"
+    },
+    {
+      "id": "c027",
+      "query": "entity index symbol seeding from query identifiers",
+      "relevant_files": ["backend/rag/entity_index.py", "backend/rag/hybrid.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: entity_index"
+    },
+    {
+      "id": "c028",
+      "query": "turn service create_turn checkpoint route_decision",
+      "relevant_files": ["backend/turn_service.py", "backend/models.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: turn_service"
+    },
+    {
+      "id": "c029",
+      "query": "openrouter model failures surface in arena metadata",
+      "relevant_files": ["backend/openrouter.py", "backend/model_failures.py"],
+      "needs_multi_hop": false,
+      "policy": "one_hop",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "authored from index: openrouter/model_failures"
+    },
+    {
+      "id": "c030",
+      "query": "overview of CodeRAG retrieval stack fusion rerank graph",
+      "relevant_files": [
+        "backend/rag/retriever.py",
+        "backend/rag/fusion.py",
+        "backend/rag/rerank.py"
+      ],
+      "needs_multi_hop": false,
+      "policy": "architectural",
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "architectural overview; multi-file"
+    }
+  ]
+}

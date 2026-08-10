@@ -23,16 +23,43 @@ v1 disagreement dump. Public Hub `curia-router` is deferred (`DEF-016`).
 | `docs/PLAN.md` | Full architecture + workstream |
 | `docs/PIPELINE.md` | Operator short path (legacy stages + notes) |
 
-## Do this first (before more mining)
+## HYP-003 null-exit (current next step)
 
-See PLAN §10. Summary:
+Instrumentation shipped (`DEC-037`+). Next is **file-level gold** + matched
+graph-on vs pool-pad eval (PLAN §10 / HYP-003).
 
-0. Instrument route into retrieval event + Observatory  
-1. Honest holdout eval (zero overlap with seed labels)  
-2. Fix metrics (`_resolve_route`; retire purity-as-gate)  
-3. 3-way policy target + abstain  
-4. Then allowlisted pointer-only harvest / synthetic short queries  
-5. Logistic probe on frozen MiniLM only if gates pass  
+```bash
+# Fixture smoke (never DEF-017)
+uv run python -m backend.run_hyp003 \
+  --repo tests/fixtures/golden_repo \
+  --gold tests/fixtures/hyp003_file_gold_fixture_smoke.json \
+  --fixture-ok --reranker mock --colbert hash
+
+# Real backend gold v1 (n=30 descriptive; expand to ≥60 before --allow-def017)
+uv run python -m backend.run_hyp003 \
+  --repo backend \
+  --gold tests/fixtures/hyp003_file_gold_v1.json \
+  --reranker mock --colbert hash
+```
+
+Gold schema: `relevant_files`, optional `needs_multi_hop`, `author`, `date`, `notes`.
+See `docs/PIPELINE.md` and PLAN §7.6.
+
+### Visual gold mining (human + AI)
+
+```bash
+# Propose candidates from index (skips files already in gold)
+uv run python RAGRouter/Training/scripts/gold_mine_candidates.py \
+  --repo backend \
+  --existing-gold tests/fixtures/hyp003_file_gold_v1.json \
+  --max-files 40
+
+# Open offline review board (no server)
+xdg-open RAGRouter/Training/data/gold_review/gold_review.html   # or open on macOS
+```
+
+In the board: edit queries, set multi-hop/policy, **Accept** rows → **Download accepted JSON**.
+Merge into the main gold file; when n≥60 set `"def017_eligible_gold": true` for powered runs.
 
 ## Legacy Stage A+B (Claude Code logs) — archive / research only
 

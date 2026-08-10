@@ -398,18 +398,39 @@ class CodeRetriever:
         return apply_ast_aware_cap(ranked, self.context_chunk_cap)
 
     def retrieve_matched_arms(
-        self, query: str
+        self,
+        query: str,
+        *,
+        force_graph_on: bool = False,
     ) -> Tuple[List[Tuple[CodeChunk, float]], List[Tuple[CodeChunk, float]]]:
         """Graph-on + length-matched padded control (DEC-042).
 
-        Treatment arm is **production** ``retrieve_ranked`` (N4: diversify at
-        rerank_top_k, not k+pad). Control uses a separate longer diversify pass
-        — fidelity of the null-exit outranks the single-rerank optimization (S9).
+        Default treatment is production ``retrieve_ranked`` (router may skip graph).
+        For HYP-003 null-exit, pass ``force_graph_on=True`` so the treatment always
+        appends graph neighbors; control is equal-length next pool slices (no graph).
         """
         from .pre_cap import apply_ast_aware_cap
+        from .query_router import QueryRoute
         from .route_decision import pad_for_matched_control
 
-        graph_on = self.retrieve_ranked(query)
+        if force_graph_on:
+            # Resolve for telemetry, then force append policy on the treatment arm.
+            self._resolve_route(query)
+            answer = self.retrieve_post_rerank_pre_graph(
+                query, top_k=self.rerank_top_k
+            )
+            forced = QueryRoute(
+                category="semantic",
+                use_graph_append=True,
+                graph_trace=False,
+                graph_seed_k=3,
+            )
+            graph_on = self._expand_graph(answer, query, forced)
+            graph_on = self._dedupe_parent_content(graph_on)
+            graph_on = apply_ast_aware_cap(graph_on, self.context_chunk_cap)
+        else:
+            graph_on = self.retrieve_ranked(query)
+
         pad_i = pad_for_matched_control(len(graph_on), self.rerank_top_k)
         target_len = self.rerank_top_k + pad_i
         control = self.retrieve_post_rerank_pre_graph(

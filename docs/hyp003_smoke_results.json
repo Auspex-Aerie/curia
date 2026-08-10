@@ -1,0 +1,123 @@
+{
+  "label": "golden_repo",
+  "repo": "tests/fixtures/golden_repo",
+  "n_gold": 5,
+  "n_scored": 5,
+  "n_dropped": 0,
+  "drops": [],
+  "mean_recall_on": 1.0,
+  "mean_recall_off": 1.0,
+  "mean_delta": 0.0,
+  "practical_delta_ge_0_05": false,
+  "sign_counts": {
+    "pos": 0,
+    "neg": 0,
+    "zero": 5
+  },
+  "append_fill": {
+    "mean": 1.2,
+    "zero_count": 1,
+    "histogram": {
+      "0": 1,
+      "1": 2,
+      "2": 2
+    },
+    "per_query": [
+      1,
+      2,
+      0,
+      2,
+      1
+    ]
+  },
+  "graph_engages": true,
+  "allow_def017": false,
+  "powered": false,
+  "def017_eligible": false,
+  "def017_note": "Eligible only when allow_def017 + n\u226560 + graph engages. Fixture / underpowered runs are descriptive only.",
+  "per_query": [
+    {
+      "id": "f01",
+      "query": "where is authenticate_user defined",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 1,
+      "len_on": 6,
+      "len_off": 6,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "auth/login.py"
+      ]
+    },
+    {
+      "id": "f02",
+      "query": "trace call chain for authenticate_user",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 2,
+      "len_on": 7,
+      "len_off": 7,
+      "needs_multi_hop": true,
+      "relevant_files": [
+        "auth/login.py",
+        "services/user_service.py",
+        "main.py"
+      ]
+    },
+    {
+      "id": "f03",
+      "query": "queue consumer for background tasks",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 0,
+      "len_on": 5,
+      "len_off": 5,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "queue/worker.py"
+      ]
+    },
+    {
+      "id": "f04",
+      "query": "auth middleware and verify token",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 2,
+      "len_on": 7,
+      "len_off": 7,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "auth/middleware.py",
+        "auth/login.py"
+      ]
+    },
+    {
+      "id": "f05",
+      "query": "register_routes API handlers",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 1,
+      "len_on": 6,
+      "len_off": 6,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "api/routes.py"
+      ]
+    }
+  ],
+  "config": {
+    "k_answer": 5,
+    "graph_append_slots": 3,
+    "context_chunk_cap": 20,
+    "reranker_mode": "mock",
+    "colbert_mode": "hash",
+    "force_graph_on": true
+  },
+  "run_at": "2026-08-10T12:44:59.581932+00:00",
+  "gold_path": "tests/fixtures/hyp003_file_gold_fixture_smoke.json"
+}
