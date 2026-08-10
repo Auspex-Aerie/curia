@@ -1,0 +1,510 @@
+{
+  "label": "backend",
+  "repo": "backend",
+  "n_gold": 30,
+  "n_scored": 30,
+  "n_dropped": 0,
+  "drops": [],
+  "mean_recall_on": 0.9555555555555555,
+  "mean_recall_off": 0.9555555555555555,
+  "mean_delta": 0.0,
+  "practical_delta_ge_0_05": false,
+  "sign_counts": {
+    "pos": 0,
+    "neg": 0,
+    "zero": 30
+  },
+  "append_fill": {
+    "mean": 4.033333333333333,
+    "zero_count": 0,
+    "histogram": {
+      "1": 2,
+      "2": 1,
+      "3": 5,
+      "4": 8,
+      "5": 14
+    },
+    "per_query": [
+      1,
+      5,
+      2,
+      5,
+      5,
+      4,
+      3,
+      4,
+      5,
+      5,
+      3,
+      3,
+      5,
+      5,
+      5,
+      5,
+      5,
+      3,
+      4,
+      5,
+      5,
+      4,
+      5,
+      1,
+      3,
+      4,
+      4,
+      4,
+      5,
+      4
+    ]
+  },
+  "graph_engages": true,
+  "allow_def017": false,
+  "powered": false,
+  "def017_eligible": false,
+  "def017_note": "Eligible only when allow_def017 + n\u226560 + graph engages. Fixture / underpowered runs are descriptive only.",
+  "per_query": [
+    {
+      "id": "c001",
+      "query": "where is the query router embedding centroid logic",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 1,
+      "len_on": 11,
+      "len_off": 11,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/query_router.py"
+      ]
+    },
+    {
+      "id": "c002",
+      "query": "how does resolve_route_decision decide path override and multi-hop",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/route_decision.py"
+      ]
+    },
+    {
+      "id": "c003",
+      "query": "CodeRetriever retrieve_matched_arms force graph on",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 2,
+      "len_on": 12,
+      "len_off": 12,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/retriever.py"
+      ]
+    },
+    {
+      "id": "c004",
+      "query": "trace call chain for resolve_route_decision through retrieve",
+      "recall_on": 0.6666666666666666,
+      "recall_off": 0.6666666666666666,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": true,
+      "relevant_files": [
+        "backend/rag/route_decision.py",
+        "backend/rag/retriever.py",
+        "backend/rag/query_router.py"
+      ]
+    },
+    {
+      "id": "c005",
+      "query": "where is extract_path_mentions and resolve_path_mentions",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/hybrid.py"
+      ]
+    },
+    {
+      "id": "c006",
+      "query": "RRF fusion of semantic and entity ranked lists",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 4,
+      "len_on": 14,
+      "len_off": 14,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/fusion.py"
+      ]
+    },
+    {
+      "id": "c007",
+      "query": "code graph neighbors_1hop and append-only expansion",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 3,
+      "len_on": 13,
+      "len_off": 13,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/graph.py",
+        "backend/rag/retriever.py"
+      ]
+    },
+    {
+      "id": "c008",
+      "query": "where is CrossEncoderReranker create_reranker",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 4,
+      "len_on": 14,
+      "len_off": 14,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/rerank.py"
+      ]
+    },
+    {
+      "id": "c009",
+      "query": "chunk_repository and AST aware chunking",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/chunker.py"
+      ]
+    },
+    {
+      "id": "c010",
+      "query": "ConversationStore FAISS and colbert sidecars",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/store.py"
+      ]
+    },
+    {
+      "id": "c011",
+      "query": "prepare_context directives skip_rag and route_decision",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 3,
+      "len_on": 13,
+      "len_off": 13,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/context_engine.py",
+        "backend/rag/route_decision.py"
+      ]
+    },
+    {
+      "id": "c012",
+      "query": "run_turn add_assistant_message route_decision persistence",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 3,
+      "len_on": 13,
+      "len_off": 13,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/run_turn.py",
+        "backend/storage_service.py"
+      ]
+    },
+    {
+      "id": "c013",
+      "query": "where is StorageService atomic conversation mutation",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/storage_service.py"
+      ]
+    },
+    {
+      "id": "c014",
+      "query": "session catalog SQLite projection rebuild",
+      "recall_on": 0.5,
+      "recall_off": 0.5,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/session_catalog.py",
+        "backend/session_projection.py"
+      ]
+    },
+    {
+      "id": "c015",
+      "query": "execution_trace topology edges and step ids",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/execution_trace.py"
+      ]
+    },
+    {
+      "id": "c016",
+      "query": "prompt_provenance typed parts and RAG event refs",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/prompt_provenance.py"
+      ]
+    },
+    {
+      "id": "c017",
+      "query": "arena council ranking and chair synthesis",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/arena.py"
+      ]
+    },
+    {
+      "id": "c018",
+      "query": "squad plan compute projected calls soft confirm",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 3,
+      "len_on": 13,
+      "len_off": 13,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/squad_plan.py"
+      ]
+    },
+    {
+      "id": "c019",
+      "query": "execution_quality gate assess_from_response_dict",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 4,
+      "len_on": 14,
+      "len_off": 14,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/execution_quality.py"
+      ]
+    },
+    {
+      "id": "c020",
+      "query": "FastAPI main app routers CORS construction",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/main.py"
+      ]
+    },
+    {
+      "id": "c021",
+      "query": "conversations SSE deliberation stream route_decision event",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/routes/conversations.py"
+      ]
+    },
+    {
+      "id": "c022",
+      "query": "HYP-002 eval harness router_accuracy and answer_slot_purity",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 4,
+      "len_on": 14,
+      "len_off": 14,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/eval_hyp002.py"
+      ]
+    },
+    {
+      "id": "c023",
+      "query": "build_eval_store WeakBiEncoder golden indexing",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/eval.py"
+      ]
+    },
+    {
+      "id": "c024",
+      "query": "parse_directives skip_rag force_summarize budget_override",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 1,
+      "len_on": 11,
+      "len_off": 11,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/directives.py"
+      ]
+    },
+    {
+      "id": "c025",
+      "query": "where is budget allocator build_budgeted_prompts",
+      "recall_on": 0.5,
+      "recall_off": 0.5,
+      "delta": 0.0,
+      "append_fill": 3,
+      "len_on": 13,
+      "len_off": 13,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/budget.py",
+        "backend/component_budget.py"
+      ]
+    },
+    {
+      "id": "c026",
+      "query": "ColBERT learned late interaction index build",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 4,
+      "len_on": 14,
+      "len_off": 14,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/colbert.py",
+        "backend/rag/colbert_learned.py"
+      ]
+    },
+    {
+      "id": "c027",
+      "query": "entity index symbol seeding from query identifiers",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 4,
+      "len_on": 14,
+      "len_off": 14,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/entity_index.py",
+        "backend/rag/hybrid.py"
+      ]
+    },
+    {
+      "id": "c028",
+      "query": "turn service create_turn checkpoint route_decision",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 4,
+      "len_on": 14,
+      "len_off": 14,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/turn_service.py",
+        "backend/models.py"
+      ]
+    },
+    {
+      "id": "c029",
+      "query": "openrouter model failures surface in arena metadata",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 5,
+      "len_on": 15,
+      "len_off": 15,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/openrouter.py",
+        "backend/model_failures.py"
+      ]
+    },
+    {
+      "id": "c030",
+      "query": "overview of CodeRAG retrieval stack fusion rerank graph",
+      "recall_on": 1.0,
+      "recall_off": 1.0,
+      "delta": 0.0,
+      "append_fill": 4,
+      "len_on": 14,
+      "len_off": 14,
+      "needs_multi_hop": false,
+      "relevant_files": [
+        "backend/rag/retriever.py",
+        "backend/rag/fusion.py",
+        "backend/rag/rerank.py"
+      ]
+    }
+  ],
+  "config": {
+    "k_answer": 10,
+    "graph_append_slots": 5,
+    "context_chunk_cap": 30,
+    "reranker_mode": "mock",
+    "colbert_mode": "hash",
+    "force_graph_on": true
+  },
+  "run_at": "2026-08-10T12:46:26.214469+00:00",
+  "gold_path": "tests/fixtures/hyp003_file_gold_v1.json"
+}

@@ -23,16 +23,27 @@ v1 disagreement dump. Public Hub `curia-router` is deferred (`DEF-016`).
 | `docs/PLAN.md` | Full architecture + workstream |
 | `docs/PIPELINE.md` | Operator short path (legacy stages + notes) |
 
-## Do this first (before more mining)
+## HYP-003 null-exit (current next step)
 
-See PLAN §10. Summary:
+Instrumentation shipped (`DEC-037`+). Next is **file-level gold** + matched
+graph-on vs pool-pad eval (PLAN §10 / HYP-003).
 
-0. Instrument route into retrieval event + Observatory  
-1. Honest holdout eval (zero overlap with seed labels)  
-2. Fix metrics (`_resolve_route`; retire purity-as-gate)  
-3. 3-way policy target + abstain  
-4. Then allowlisted pointer-only harvest / synthetic short queries  
-5. Logistic probe on frozen MiniLM only if gates pass  
+```bash
+# Fixture smoke (never DEF-017)
+uv run python -m backend.run_hyp003 \
+  --repo tests/fixtures/golden_repo \
+  --gold tests/fixtures/hyp003_file_gold_fixture_smoke.json \
+  --fixture-ok --reranker mock --colbert hash
+
+# Real backend gold v1 (n=30 descriptive; expand to ≥60 before --allow-def017)
+uv run python -m backend.run_hyp003 \
+  --repo backend \
+  --gold tests/fixtures/hyp003_file_gold_v1.json \
+  --reranker mock --colbert hash
+```
+
+Gold schema: `relevant_files`, optional `needs_multi_hop`, `author`, `date`, `notes`.
+See `docs/PIPELINE.md` and PLAN §7.6.
 
 ## Legacy Stage A+B (Claude Code logs) — archive / research only
 

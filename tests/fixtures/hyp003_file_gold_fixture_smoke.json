@@ -1,0 +1,51 @@
+{
+  "schema": "hyp003_file_gold/v1",
+  "description": "Toy golden_repo only — descriptive smoke for the harness. Never allow_def017.",
+  "queries": [
+    {
+      "id": "f01",
+      "query": "where is authenticate_user defined",
+      "relevant_files": ["auth/login.py"],
+      "needs_multi_hop": false,
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "from hyp001; file-level only"
+    },
+    {
+      "id": "f02",
+      "query": "trace call chain for authenticate_user",
+      "relevant_files": ["auth/login.py", "services/user_service.py", "main.py"],
+      "needs_multi_hop": true,
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "from hyp001"
+    },
+    {
+      "id": "f03",
+      "query": "queue consumer for background tasks",
+      "relevant_files": ["queue/worker.py"],
+      "needs_multi_hop": false,
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "from hyp001"
+    },
+    {
+      "id": "f04",
+      "query": "auth middleware and verify token",
+      "relevant_files": ["auth/middleware.py", "auth/login.py"],
+      "needs_multi_hop": false,
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "from hyp001"
+    },
+    {
+      "id": "f05",
+      "query": "register_routes API handlers",
+      "relevant_files": ["api/routes.py"],
+      "needs_multi_hop": false,
+      "author": "curia-team",
+      "date": "2026-08-10",
+      "notes": "from hyp001"
+    }
+  ]
+}

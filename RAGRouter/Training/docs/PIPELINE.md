@@ -48,3 +48,28 @@ abstain — not LoRA/SupCon. See PLAN §7 and `HYP-003`.
 
 (ask → files actually read) is the primary mining value for DIS-001
 (rerank/index), not optional decoration on router training.
+
+## HYP-003 null-exit (file-level gold)
+
+Gold lives in `tests/fixtures/hyp003_file_gold_v1.json` (Curia `backend/` paths).
+Expand toward **n≥60** before any DEF-017 decision. Fixture smoke only with
+`--fixture-ok`.
+
+```bash
+# Fast smoke (toy repo — descriptive only)
+uv run python -m backend.run_hyp003 \
+  --repo tests/fixtures/golden_repo \
+  --gold tests/fixtures/hyp003_file_gold_fixture_smoke.json \
+  --fixture-ok --reranker mock --colbert hash \
+  --output docs/hyp003_smoke_results.json
+
+# Real-index descriptive run (default gold v1, n≈30; not DEF-017 eligible yet)
+uv run python -m backend.run_hyp003 \
+  --repo backend \
+  --gold tests/fixtures/hyp003_file_gold_v1.json \
+  --reranker mock --colbert hash \
+  --output docs/hyp003_results.json
+
+# Production-ish (slow): learned ColBERT + jina, still need n≥60 + --allow-def017
+# uv run python -m backend.run_hyp003 --repo backend --colbert learned --reranker jina --allow-def017
+```
